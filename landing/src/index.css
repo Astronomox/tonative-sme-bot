@@ -96,3 +96,93 @@ img {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
 }
+
+/* ========================
+   MOBILE RESPONSIVENESS
+   ======================== */
+
+@media (max-width: 768px) {
+  /* Nav */
+  nav > div:nth-child(2) { display: none !important; }
+  nav { padding: 1rem 1.25rem !important; }
+
+  /* Hero */
+  .hero-section {
+    grid-template-columns: 1fr !important;
+    padding: 0 1.25rem !important;
+    padding-top: 5rem !important;
+    gap: 2.5rem !important;
+    min-height: auto !important;
+    padding-bottom: 3rem !important;
+  }
+  .hero-right-col { display: none !important; }
+  .hero-left-col { max-width: 100% !important; }
+
+  /* Sections */
+  .section-container {
+    padding: 4rem 1.25rem !important;
+  }
+
+  /* Features grid */
+  .features-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* How it works */
+  .how-steps-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0 !important;
+  }
+  .how-step-item {
+    border-right: none !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding: 1.5rem 0 !important;
+  }
+  .how-step-item:last-child {
+    border-bottom: none !important;
+  }
+  .how-connector-line { display: none !important; }
+  .how-header-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+
+  /* Testimonials */
+  .testimonials-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* CTA */
+  .cta-section {
+    padding: 5rem 1.25rem !important;
+  }
+
+  /* Footer */
+  footer {
+    padding: 2rem 1.25rem !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+  }
+
+  /* WhatsApp widget */
+  .wa-widget-wrap {
+    bottom: 1.25rem !important;
+    right: 1.25rem !important;
+  }
+}
+
+@media (max-width: 1024px) and (min-width: 769px) {
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .testimonials-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .hero-section {
+    gap: 2rem !important;
+    padding: 0 2rem !important;
+    padding-top: 5.5rem !important;
+    padding-bottom: 3rem !important;
+  }
+}

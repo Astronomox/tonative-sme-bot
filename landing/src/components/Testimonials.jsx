@@ -93,7 +93,7 @@ export default function Testimonials() {
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
           gap: '1.25rem',
-        }}>
+        }} className="testimonials-grid">
           {testimonials.map((t, i) => (
             <div
               key={i}

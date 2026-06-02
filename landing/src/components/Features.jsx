@@ -127,6 +127,7 @@ export default function Features() {
   return (
     <section id="features" style={{
       padding: '8rem 3rem',
+      className: "section-container",
       background: 'var(--bg)',
     }}>
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -153,7 +154,7 @@ export default function Features() {
           No apps, no forms, no appointments. Just WhatsApp, in your language, at any hour.
         </p>
 
-        <div style={{
+        <div className="features-grid" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
           gap: '1.25rem',
