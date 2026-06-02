@@ -6,3 +6,5 @@ venv/
 backend/.env
 .DS_Store
 Thumbs.db
+landing/node_modules/ 
+landing/dist/ 

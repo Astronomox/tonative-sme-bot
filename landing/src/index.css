@@ -1,0 +1,98 @@
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #F7F6F2;
+  --white: #FFFFFF;
+  --ink: #0C1A0E;
+  --ink-2: #3D4A3F;
+  --ink-3: #8A9490;
+  --green: #1A7A3C;
+  --green-bright: #22C55E;
+  --green-light: #EDFAF2;
+  --green-mid: #BBF0D0;
+  --gold: #A06B15;
+  --gold-light: #FEF3E2;
+  --border: #E4E2DC;
+  --shadow-sm: 0 1px 3px rgba(12,26,14,0.06), 0 1px 2px rgba(12,26,14,0.04);
+  --shadow: 0 4px 16px rgba(12,26,14,0.08), 0 2px 6px rgba(12,26,14,0.04);
+  --shadow-lg: 0 20px 60px rgba(12,26,14,0.12), 0 8px 24px rgba(12,26,14,0.06);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-full: 100px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Fraunces', serif;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+/* Utility */
+.container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 2.5rem;
+}
+
+/* Reveal animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-up {
+  animation: fadeUp 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.45s; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(34,197,94,0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
