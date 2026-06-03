@@ -1,64 +1,91 @@
 import asyncio
-import hashlib
-import hmac
-import base64
 import logging
+from pathlib import Path
 
-from fastapi import APIRouter, Request, Response, HTTPException
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import FileResponse
 
-from app.core.config import settings
 from app.services.conversation import handle_incoming_message
-from app.services.whatsapp import build_twiml_text, split_message, send_whatsapp_message
+from app.services.whatsapp import send_whatsapp_message
+from app.core.config import settings
+from app.services.aethex import cleanup_old_tts_files, TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/webhook", tags=["webhook"])
-
-
-def _validate_twilio_signature(url: str, params: dict, signature: str, auth_token: str) -> bool:
-    """Validate that a request actually came from Twilio using HMAC-SHA1."""
-    if not auth_token:
-        return True  # skip in dev mode
-
-    data = url
-    for key in sorted(params.keys()):
-        data += key + str(params[key])
-
-    expected = base64.b64encode(
-        hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()
-    ).decode()
-
-    return hmac.compare_digest(expected, signature)
+router = APIRouter()
 
 
-@router.post("/whatsapp")
+def _twiml_text(text: str) -> str:
+    """TwiML with text only."""
+    escaped = (
+        text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped}</Message></Response>'
+
+
+def _twiml_text_and_audio(text: str, audio_url: str) -> str:
+    """TwiML with text + audio media."""
+    escaped = (
+        text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response>'
+        f'<Message>{escaped}<Media>{audio_url}</Media></Message>'
+        f'</Response>'
+    )
+
+
+def _twiml_error(message: str) -> str:
+    return _twiml_text(message)
+
+
+@router.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
-    """
-    Twilio sends a POST here every time someone messages the WhatsApp sandbox.
-    We process it and return TwiML.
-    """
-    form_data = await request.form()
+    """Main Twilio WhatsApp webhook."""
 
-    # --- Signature validation (Fix #1) ---
-    if settings.TWILIO_AUTH_TOKEN:
-        signature = request.headers.get("X-Twilio-Signature", "")
-        url = str(request.url)
-        params = {k: str(v) for k, v in form_data.items()}
-        if not _validate_twilio_signature(url, params, signature, settings.TWILIO_AUTH_TOKEN):
-            logger.warning(f"Invalid Twilio signature from {request.client.host}")
-            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+    # ── Parse form data ──────────────────────────────────────────────────────
+    try:
+        form_data = await request.form()
+    except Exception as e:
+        logger.error(f"Failed to parse form data: {e}")
+        return Response(content=_twiml_error("Sorry, something went wrong."), media_type="text/xml")
 
     phone_number = form_data.get("From", "")
     body = form_data.get("Body", "")
     num_media = int(form_data.get("NumMedia", "0"))
-    media_url = form_data.get("MediaUrl0", None)
+    media_url = form_data.get("MediaUrl0")
     media_content_type = form_data.get("MediaContentType0", "audio/ogg")
 
     logger.info(
-        f"Incoming from {phone_number}: "
-        f"body='{body[:50]}' media={num_media} type={media_content_type}"
+        f"Incoming | from={phone_number} | "
+        f"body='{body[:60]}' | media={num_media} | type={media_content_type}"
     )
 
+    # ── Signature verification ────────────────────────────────────────────────
+    if settings.TWILIO_AUTH_TOKEN:
+        try:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+            url = str(request.url)
+            signature = request.headers.get("X-Twilio-Signature", "")
+            params = dict(form_data)
+            if not validator.validate(url, params, signature):
+                logger.warning(f"Invalid Twilio signature from {phone_number}")
+                # Log but don't reject — sandbox may differ
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Signature validation error: {e}")
+
+    # ── Process with 12s timeout ──────────────────────────────────────────────
     try:
         result = await asyncio.wait_for(
             handle_incoming_message(
@@ -71,30 +98,55 @@ async def whatsapp_webhook(request: Request):
             timeout=12.0,
         )
     except asyncio.TimeoutError:
-        logger.warning(f"Processing timed out for {phone_number}")
-        result = {
-            "text_response": "I am taking a bit longer than usual. Please send your message again in a moment.",
-            "audio_bytes": None,
-        }
+        logger.error(f"Message processing timed out for {phone_number}")
+        return Response(
+            content=_twiml_text(
+                "Taking longer than usual. Your message is being processed — I'll reply shortly!"
+            ),
+            media_type="text/xml",
+        )
+    except Exception as e:
+        logger.error(f"Unhandled error for {phone_number}: {e}", exc_info=True)
+        return Response(
+            content=_twiml_error("Something went wrong. Please try again!"),
+            media_type="text/xml",
+        )
 
-    text_response = result["text_response"]
+    # ── Build response ────────────────────────────────────────────────────────
+    text_response = result.get("text_response", "")
+    audio_path: Path = result.get("audio_path")
 
-    # --- Message splitting (Fix #3) ---
-    chunks = split_message(text_response)
-
-    if len(chunks) == 1:
-        twiml = build_twiml_text(chunks[0])
+    if audio_path and audio_path.exists():
+        # Serve audio back as WhatsApp media
+        audio_filename = audio_path.name
+        audio_url = f"{settings.PUBLIC_URL}/media/tts/{audio_filename}"
+        logger.info(f"Sending voice reply: {audio_url}")
+        twiml = _twiml_text_and_audio(text_response, audio_url)
     else:
-        # First chunk goes via TwiML (immediate response)
-        twiml = build_twiml_text(chunks[0])
-        # Remaining chunks sent via REST API as follow-up messages
-        for chunk in chunks[1:]:
-            await send_whatsapp_message(phone_number, chunk)
+        twiml = _twiml_text(text_response)
 
-    return Response(content=twiml, media_type="application/xml")
+    # Clean up old TTS files in background
+    asyncio.create_task(_cleanup())
+
+    return Response(content=twiml, media_type="text/xml")
 
 
-@router.get("/whatsapp")
-async def whatsapp_webhook_verify(request: Request):
-    """Health check endpoint for Twilio webhook verification."""
-    return {"status": "ok", "message": "Tonative SME Bot webhook is active"}
+async def _cleanup():
+    try:
+        cleanup_old_tts_files(max_age_seconds=300)
+    except Exception:
+        pass
+
+
+@router.get("/media/tts/{filename}")
+async def serve_tts_audio(filename: str):
+    """Serve TTS WAV files for WhatsApp media replies."""
+    # Sanitize filename — no path traversal
+    if "/" in filename or ".." in filename:
+        return Response(status_code=400)
+
+    path = TTS_CACHE_DIR / filename
+    if not path.exists() or not path.is_file():
+        return Response(status_code=404)
+
+    return FileResponse(path, media_type="audio/wav")

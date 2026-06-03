@@ -185,3 +185,17 @@ async def trigger_weekly_digest():
     from app.services.reminders import send_new_opportunity_alerts
     sent = await send_new_opportunity_alerts()
     return {"status": "ok", "notifications_sent": sent}
+
+
+@router.get("/api/aethex/status")
+async def aethex_status():
+    """Check AethexAI API health — TTS + transcription."""
+    from app.services.aethex import ping_aethex, get_aethex_status
+    ping_result = await ping_aethex()
+    current = get_aethex_status()
+    return {
+        "aethex_enabled": settings.aethex_enabled,
+        "ping": ping_result,
+        "last_transcription": current["transcription"],
+        "last_tts": current["tts"],
+    }

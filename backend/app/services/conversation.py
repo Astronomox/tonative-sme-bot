@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import SMEProfile, UserState
@@ -9,8 +10,9 @@ from app.services.database import (
 )
 from app.services.llm import chat_with_sme, extract_profile_data, search_and_respond, should_search_web
 from app.services.matching import get_matched_opportunities, format_opportunities_for_whatsapp
-from app.services.tonative import detect_language, translate_to_english, translate_from_english
-from app.services.voice import download_twilio_media, transcribe_audio
+from app.services.tonative import detect_language
+from app.services.voice import download_twilio_media
+from app.services import aethex
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +24,12 @@ What kind of business do you run?"""
 
 CONFIRMATION_PROMPTS = {
     "yes", "correct", "yeah", "yep", "yh", "y", "sure", "right",
-    "true", "ok", "okay", "confirmed", "correct", "that's right",
-    "yes that's right", "yes correct"
+    "true", "ok", "okay", "confirmed", "yes that's right", "yes correct",
 }
 
 APPLICATION_CONFIRMATIONS = {
     "applied", "i applied", "done", "submitted",
-    "i have applied", "i submitted", "i've applied"
+    "i have applied", "i submitted", "i've applied",
 }
 
 
@@ -39,44 +40,53 @@ async def handle_incoming_message(
     num_media: int = 0,
     media_content_type: str = "audio/ogg",
 ) -> dict:
-
+    """
+    Main entry point. Returns:
+    {
+        "text_response": str,
+        "audio_path": Optional[Path],  # WAV file path for TTS reply
+    }
+    """
     user_text = body or ""
     detected_lang = "en"
+    is_voice_message = num_media > 0 and media_url
 
-    if body:
-        detected_lang = await detect_language(body)
+    # ── Voice transcription ──────────────────────────────────────────────────
+    if is_voice_message:
+        # Detect language from any text body first (optional hint)
+        if body:
+            detected_lang = await detect_language(body)
 
-    # Voice note
-    if num_media > 0 and media_url:
         audio_bytes = await download_twilio_media(media_url)
-        if audio_bytes:
-            transcript = await transcribe_audio(
-                audio_bytes,
-                content_type=media_content_type,
-                detected_language=detected_lang,
-            )
-            if transcript:
-                user_text = transcript
-                logger.info(f"Voice transcribed ({detected_lang}): {transcript[:80]}")
-            else:
-                return {
-                    "text_response": "Got your voice note but couldn't make it out clearly.\n\nTry sending it again or just type it out, whichever is easier for you.",
-                    "audio_bytes": None,
-                }
-        else:
+        if not audio_bytes:
             return {
-                "text_response": "Had trouble receiving that voice note.\n\nCould you try again or type your message instead?",
-                "audio_bytes": None,
+                "text_response": (
+                    "Had trouble receiving your voice note. Could you try again or type it out?"
+                ),
+                "audio_path": None,
             }
 
+        # Use Aethex (EN/FR) or Groq Whisper (all languages)
+        transcript = await aethex.transcribe_audio(audio_bytes, media_content_type, detected_lang)
+        if not transcript:
+            return {
+                "text_response": (
+                    "Got your voice note but couldn't make it out clearly.\n\n"
+                    "Try again or just type your message   either works!"
+                ),
+                "audio_path": None,
+            }
+
+        user_text = transcript
+        logger.info(f"Transcribed ({detected_lang}): {transcript[:80]}")
+
     if not user_text.strip():
-        return {
-            "text_response": "Didn't catch that. Send me a message and I'll sort you out.",
-            "audio_bytes": None,
-        }
+        return {"text_response": "Didn't catch that. Send me a message!", "audio_path": None}
 
-    english_text = await translate_to_english(user_text, detected_lang)
+    # ── Language detection ───────────────────────────────────────────────────
+    detected_lang = await detect_language(user_text)
 
+    # ── Load / create profile ────────────────────────────────────────────────
     profile = await get_profile(phone_number)
     is_new_user = profile is None
 
@@ -88,39 +98,54 @@ async def handle_incoming_message(
         )
         await upsert_profile(profile)
 
+    # Update language if changed
     if detected_lang != profile.language:
         profile.language = detected_lang
         await upsert_profile(profile)
 
+    # ── New user welcome ─────────────────────────────────────────────────────
     if is_new_user:
         await save_message(phone_number, "assistant", WELCOME_MESSAGE)
-        return {"text_response": WELCOME_MESSAGE, "audio_bytes": None}
+        audio_path = await _maybe_tts(WELCOME_MESSAGE, detected_lang, is_voice_message)
+        return {"text_response": WELCOME_MESSAGE, "audio_path": audio_path}
 
-    await save_message(phone_number, "user", english_text)
+    await save_message(phone_number, "user", user_text)
 
-    response_text = await _process_by_state(profile, english_text)
-
-    final_response = await translate_from_english(response_text, detected_lang)
+    # ── Process ──────────────────────────────────────────────────────────────
+    response_text = await _process_by_state(profile, user_text, detected_lang)
     await save_message(phone_number, "assistant", response_text)
 
-    return {"text_response": final_response, "audio_bytes": None}
+    # Generate TTS reply if user sent voice
+    audio_path = await _maybe_tts(response_text, detected_lang, is_voice_message)
+
+    return {"text_response": response_text, "audio_path": audio_path}
 
 
-async def _process_by_state(profile: SMEProfile, user_text: str) -> str:
+async def _maybe_tts(text: str, language: str, user_sent_voice: bool) -> Optional[Path]:
+    """Generate TTS audio if user sent a voice note and language is supported."""
+    if not user_sent_voice:
+        return None
+    # Only EN and FR supported by Aethex TTS
+    if language not in ("en", "fr"):
+        return None
+    # Strip WhatsApp formatting before TTS
+    clean = text.replace("*", "").replace("_", "").replace("\n\n", " ").replace("\n", " ")
+    # Keep under 500 chars for quick TTS
+    if len(clean) > 500:
+        clean = clean[:497] + "..."
+    return await aethex.text_to_speech(clean, language)
+
+
+async def _process_by_state(profile: SMEProfile, user_text: str, lang: str) -> str:
     lower = user_text.lower().strip()
 
-    # Global commands
+    # ── Global commands ──────────────────────────────────────────────────────
     if lower in ("reset", "start over", "restart"):
         profile.state = UserState.ONBOARDING
-        profile.business_name = None
-        profile.business_type = None
-        profile.location_city = None
-        profile.location_state = None
-        profile.business_stage = None
-        profile.monthly_revenue = None
-        profile.employee_count = None
-        profile.cac_registered = None
-        profile.biggest_challenge = None
+        for field in ["business_name", "business_type", "location_city", "location_state",
+                      "business_stage", "monthly_revenue", "employee_count", "cac_registered",
+                      "biggest_challenge"]:
+            setattr(profile, field, None)
         await upsert_profile(profile)
         return "No problem, let's start fresh.\n\n" + WELCOME_MESSAGE
 
@@ -129,13 +154,15 @@ async def _process_by_state(profile: SMEProfile, user_text: str) -> str:
             "Here's what BizPadi can do for you:\n\n"
             "Find funding opportunities that match your specific business\n\n"
             "Walk you through applications step by step\n\n"
+            "Tell you exactly which documents to gather (fund readiness)\n\n"
             "Track applications you've submitted\n\n"
-            "Search for the latest grants, loans, and programmes in Nigeria\n\n"
-            "Answer any business question you throw at me\n\n"
-            "Commands you can use:\n"
+            "Search for the latest grants and loans in Nigeria\n\n"
+            "Answer any business question\n\n"
+            "Commands:\n"
             "Type *opportunities* to see your matched funding\n"
             "Type *my applications* to track what you've applied for\n"
-            "Type a *number* (1 to 5) to get application steps for a listed opportunity\n"
+            "Type *documents [number]* to get the document checklist for an opportunity\n"
+            "Type a *number* (1 to 5) to get application steps\n"
             "Type *reset* to start your profile over"
         )
 
@@ -143,27 +170,36 @@ async def _process_by_state(profile: SMEProfile, user_text: str) -> str:
         return await _handle_application_status(profile)
 
     if _is_opportunity_selection(user_text, profile):
-        return await _handle_opportunity_selection(profile, user_text)
+        return await _handle_opportunity_selection(profile, user_text, lang)
 
     if any(lower == p for p in APPLICATION_CONFIRMATIONS):
-        return await _handle_application_confirmation(profile, lower)
+        return await _handle_application_confirmation(profile)
 
+    # Document checklist request
+    if lower.startswith("documents") or lower.startswith("docs "):
+        return await _handle_document_request(profile, user_text, lang)
+
+    # ── Route by state ────────────────────────────────────────────────────────
     if profile.state in (UserState.NEW, UserState.ONBOARDING):
-        return await _handle_onboarding(profile, user_text)
+        return await _handle_onboarding(profile, user_text, lang)
     elif profile.state == UserState.CONFIRMING:
-        return await _handle_confirmation(profile, user_text)
+        return await _handle_confirmation(profile, user_text, lang)
     elif profile.state == UserState.PROFILED:
-        return await _handle_profiled(profile, user_text)
+        return await _handle_profiled(profile, user_text, lang)
     else:
-        return await _handle_support(profile, user_text)
+        return await _handle_support(profile, user_text, lang)
 
 
-async def _handle_onboarding(profile: SMEProfile, user_text: str) -> str:
+# ─────────────────────────────────────────────────────────────────────────────
+# ONBOARDING
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _handle_onboarding(profile: SMEProfile, user_text: str, lang: str) -> str:
     history = await format_history_for_llm(profile.phone_number)
-    response = await chat_with_sme(history, user_text)
+    response = await chat_with_sme(history, user_text, lang)
 
     if not response:
-        return "I'm having a small issue right now. Try again in a moment."
+        return "Having a small issue right now. Try again in a moment."
 
     full_history = history + [
         {"role": "user", "content": user_text},
@@ -172,8 +208,11 @@ async def _handle_onboarding(profile: SMEProfile, user_text: str) -> str:
     extracted = await extract_profile_data(full_history)
 
     if extracted:
-        updated = await update_profile_fields(profile.phone_number, extracted)
+        # Update language from extraction if detected
+        if "language" in extracted and extracted["language"] in ("en", "fr", "yo", "ha", "pcm", "ar"):
+            profile.language = extracted["language"]
 
+        updated = await update_profile_fields(profile.phone_number, extracted)
         if updated and updated.is_profile_complete():
             updated.state = UserState.CONFIRMING
             await upsert_profile(updated)
@@ -182,22 +221,23 @@ async def _handle_onboarding(profile: SMEProfile, user_text: str) -> str:
     return response
 
 
-async def _handle_confirmation(profile: SMEProfile, user_text: str) -> str:
+# ─────────────────────────────────────────────────────────────────────────────
+# PROFILE CONFIRMATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _handle_confirmation(profile: SMEProfile, user_text: str, lang: str) -> str:
     lower = user_text.lower().strip()
 
     if any(lower == p or lower.startswith(p) for p in CONFIRMATION_PROMPTS):
         profile.state = UserState.PROFILED
         await upsert_profile(profile)
-
         matches = get_matched_opportunities(profile)
         match_text = format_opportunities_for_whatsapp(matches)
+        return f"Let me pull up your best matches.\n\n{match_text}"
 
-        return f"Perfect. Let me pull up your best matches.\n\n{match_text}"
-
-    # User wants to correct something
+    # Correction request
     history = await format_history_for_llm(profile.phone_number)
-    response = await chat_with_sme(history, user_text)
-
+    response = await chat_with_sme(history, user_text, lang)
     full_history = history + [
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": response or ""},
@@ -208,10 +248,14 @@ async def _handle_confirmation(profile: SMEProfile, user_text: str) -> str:
         if updated:
             return updated.to_confirmation_message()
 
-    return response or "What would you like to change? Just tell me and I'll fix it."
+    return response or "What would you like to change? Just tell me."
 
 
-async def _handle_profiled(profile: SMEProfile, user_text: str) -> str:
+# ─────────────────────────────────────────────────────────────────────────────
+# PROFILED
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _handle_profiled(profile: SMEProfile, user_text: str, lang: str) -> str:
     lower = user_text.lower().strip()
 
     if any(kw in lower for kw in ["opportunities", "funding", "grants", "loans", "show me", "find"]) and len(user_text) < 30:
@@ -219,68 +263,77 @@ async def _handle_profiled(profile: SMEProfile, user_text: str) -> str:
         return format_opportunities_for_whatsapp(matches)
 
     if should_search_web(user_text):
-        logger.info(f"Web search triggered: {user_text[:50]}")
-        result = await search_and_respond(user_text, profile.to_summary())
+        result = await search_and_respond(user_text, profile.to_summary(), lang)
         if result:
             return result
 
     history = await format_history_for_llm(profile.phone_number)
-    response = await chat_with_sme(history, user_text)
-    return response or "Having a small issue right now. Try again in a moment."
+    return await chat_with_sme(history, user_text, lang) or "Having a small issue. Try again in a moment."
 
 
-async def _handle_support(profile: SMEProfile, user_text: str) -> str:
+async def _handle_support(profile: SMEProfile, user_text: str, lang: str) -> str:
     if should_search_web(user_text):
         result = await search_and_respond(
             user_text,
-            profile.to_summary() if profile.business_name else ""
+            profile.to_summary() if profile.business_name else "",
+            lang,
         )
         if result:
             return result
 
     history = await format_history_for_llm(profile.phone_number)
-    response = await chat_with_sme(history, user_text)
-    return response or "Having a small issue right now. Try again in a moment."
+    return await chat_with_sme(history, user_text, lang) or "Having a small issue. Try again in a moment."
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPPORTUNITY SELECTION + DOCUMENTS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _is_opportunity_selection(text: str, profile: SMEProfile) -> bool:
     stripped = text.strip()
-    if not stripped.isdigit():
-        return False
-    return 1 <= int(stripped) <= 5 and profile.state in (
-        UserState.PROFILED, UserState.SUPPORT, UserState.CONFIRMING
+    return (
+        stripped.isdigit()
+        and 1 <= int(stripped) <= 10
+        and profile.state in (UserState.PROFILED, UserState.SUPPORT, UserState.CONFIRMING)
     )
 
 
-async def _handle_opportunity_selection(profile: SMEProfile, user_text: str) -> str:
+async def _handle_opportunity_selection(profile: SMEProfile, user_text: str, lang: str) -> str:
     index = int(user_text.strip())
     matches = get_matched_opportunities(profile)
 
     if index < 1 or index > len(matches):
-        return "That number doesn't match anything on the list. Try a number between 1 and 5."
+        return "That number doesn't match anything on the list. Reply with a number from the list above."
 
     match = matches[index - 1]
     opp = match["opportunity"]
     already_applied = match.get("already_applied", False)
 
-    steps = "\n\n".join(
-        f"{i}. {step}" for i, step in enumerate(opp["application_steps"], 1)
-    )
+    # Application steps
+    steps = "\n\n".join(f"{i}. {step}" for i, step in enumerate(opp["application_steps"], 1))
+
+    # Document checklist
+    docs = opp.get("required_documents", [])
+    doc_list = "\n".join(f"• {doc}" for doc in docs)
 
     response = (
         f"*{opp['name']}*\n\n"
-        f"{opp['description']}\n\n"
+        f"{opp['description'][:300]}\n\n"
         f"Amount: {opp['amount']}\n\n"
         f"Deadline: {opp['deadline']}\n\n"
         f"CAC required: {'Yes' if opp['requires_cac'] else 'No'}\n\n"
-        f"How to apply:\n\n{steps}\n\n"
+        f"*Documents you need to gather:*\n{doc_list}\n\n"
+        f"*How to apply:*\n\n{steps}\n\n"
         f"Link: {opp['application_link']}\n\n"
     )
 
     if already_applied:
         response += "You already applied for this one. Want me to check on the status?"
     else:
-        response += "Once you apply, just reply *applied* and I'll track it for you. Need help with any of the steps?"
+        response += (
+            "Once you have all your documents ready, reply *applied* and I'll track it for you.\n\n"
+            "Need help getting any of these documents? Just ask."
+        )
 
     profile.state = UserState.SUPPORT
     await upsert_profile(profile)
@@ -288,18 +341,48 @@ async def _handle_opportunity_selection(profile: SMEProfile, user_text: str) -> 
     await save_message(
         profile.phone_number,
         "system",
-        f"[VIEWED_OPPORTUNITY:{opp['id']}:{opp['name']}]"
+        f"[VIEWED_OPPORTUNITY:{opp['id']}:{opp['name']}]",
     )
-
     return response
 
 
-async def _handle_application_confirmation(profile: SMEProfile, user_text: str) -> str:
+async def _handle_document_request(profile: SMEProfile, user_text: str, lang: str) -> str:
+    """User asked specifically for document checklist."""
+    # Try to extract a number
+    parts = user_text.split()
+    num = None
+    for p in parts:
+        if p.isdigit():
+            num = int(p)
+            break
+
+    if num:
+        matches = get_matched_opportunities(profile)
+        if 1 <= num <= len(matches):
+            opp = matches[num - 1]["opportunity"]
+            docs = opp.get("required_documents", [])
+            doc_list = "\n".join(f"{i}. {doc}" for i, doc in enumerate(docs, 1))
+            return (
+                f"*Documents needed for {opp['name']}:*\n\n"
+                f"{doc_list}\n\n"
+                f"Which of these do you already have? I can help you get the ones you're missing."
+            )
+
+    return (
+        "Which opportunity do you want the document checklist for?\n\n"
+        "Type the number from the list, like: *documents 1*"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPLICATION TRACKING
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _handle_application_confirmation(profile: SMEProfile) -> str:
     from app.services.database import get_conversation_history
     full_history = await get_conversation_history(profile.phone_number, limit=30)
 
-    last_opp_id = None
-    last_opp_name = None
+    last_opp_id = last_opp_name = None
     for msg in reversed(full_history):
         content = msg.get("content", "")
         if content.startswith("[VIEWED_OPPORTUNITY:"):
@@ -311,16 +394,15 @@ async def _handle_application_confirmation(profile: SMEProfile, user_text: str) 
     if last_opp_id and last_opp_name:
         await track_application(profile.phone_number, last_opp_id, last_opp_name)
         return (
-            f"That's great news.\n\n"
+            f"That's great.\n\n"
             f"I've logged your application for *{last_opp_name}*. "
-            f"I'll remind you as the deadline gets closer.\n\n"
-            f"Type *my applications* anytime to see your tracking. Fingers crossed for you."
+            f"I'll remind you as the deadline approaches.\n\n"
+            f"Type *my applications* anytime to see your full tracker."
         )
-    else:
-        return (
-            "That's great. Which opportunity did you apply for? "
-            "Just tell me the name and I'll track it for you."
-        )
+    return (
+        "That's great! Which opportunity did you apply for? "
+        "Just tell me the name and I'll track it for you."
+    )
 
 
 async def _handle_application_status(profile: SMEProfile) -> str:
@@ -329,18 +411,12 @@ async def _handle_application_status(profile: SMEProfile) -> str:
     if not applications:
         return (
             "You haven't tracked any applications yet.\n\n"
-            "After you apply for an opportunity, just reply *applied* and I'll log it for you.\n\n"
+            "After you apply for an opportunity, reply *applied* and I'll log it.\n\n"
             "Type *opportunities* to see your matched funding."
         )
 
-    status_emoji = {
-        "applied": "📤",
-        "pending": "⏳",
-        "approved": "✅",
-        "rejected": "❌",
-    }
-
-    lines = ["Here's your application tracker:\n"]
+    status_emoji = {"applied": "📤", "pending": "⏳", "approved": "✅", "rejected": "❌"}
+    lines = ["*Your Applications:*\n"]
     for app in applications[:10]:
         emoji = status_emoji.get(app.get("status", "applied"), "📤")
         name = app.get("opportunity_name", "Unknown")
@@ -348,5 +424,5 @@ async def _handle_application_status(profile: SMEProfile) -> str:
         lines.append(f"{emoji} *{name}*")
         lines.append(f"Status: {status}\n")
 
-    lines.append("To update a status just tell me, for example: *approved Tony Elumelu* or *rejected BOI loan*.")
+    lines.append("To update: reply *approved [name]* or *rejected [name]*")
     return "\n".join(lines)
