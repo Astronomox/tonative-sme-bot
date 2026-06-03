@@ -32,7 +32,8 @@ AETHEX_LANG_MAP = {
 }
 
 # Temp directory for serving TTS audio files to WhatsApp
-TTS_CACHE_DIR = Path("/tmp/bizpadi_tts")
+import tempfile
+TTS_CACHE_DIR = Path(tempfile.gettempdir()) / "bizpadi_tts"
 TTS_CACHE_DIR.mkdir(exist_ok=True)
 
 _status = {"transcription": {"ok": False, "latency_ms": 0, "error": None},

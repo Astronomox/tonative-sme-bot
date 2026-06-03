@@ -5,4 +5,3 @@ pydantic==2.9.0
 python-dotenv==1.0.1
 python-multipart==0.0.9
 asyncpg==0.29.0
-sentence-transformers==3.3.1
