@@ -23,10 +23,10 @@ async def lifespan(app: FastAPI):
     logger.info("TONATIVE SME BOT starting up")
     logger.info("=" * 60)
     logger.info(f"Groq LLM:      {'READY' if settings.groq_enabled else 'NOT CONFIGURED'}")
+    logger.info(f"AethexAI:      {'READY' if settings.aethex_enabled else 'NOT CONFIGURED'}")
     logger.info(f"PostgreSQL:    {'READY' if settings.DATABASE_URL else 'USING IN-MEMORY'}")
-    logger.info(f"Tonative AI:   {'READY' if settings.tonative_enabled else 'USING FALLBACK'}")
-    logger.info(f"ElevenLabs:    {'READY' if settings.elevenlabs_enabled else 'DISABLED'}")
     logger.info(f"Twilio:        {'READY' if settings.TWILIO_ACCOUNT_SID else 'NOT CONFIGURED'}")
+    logger.info(f"Public URL:    {settings.PUBLIC_URL}")
     logger.info("=" * 60)
     yield
     from app.services.database import close_pool
