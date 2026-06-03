@@ -18,9 +18,12 @@ export default function Nav() {
         <a href="/" className="nav-logo">Biz<span>Padi</span></a>
 
         <div className="nav-links">
-          <a href="#features" className="nav-link">Features</a>
-          <a href="#how" className="nav-link">How it works</a>
-          <a href="#stories" className="nav-link">Stories</a>
+          {[['Features','features'],['How it works','how'],['Stories','stories']].map(([label, id]) => (
+            <button key={id} className="nav-link"
+              style={{ background:'none', border:'none', cursor:'pointer', font:'inherit', padding:0 }}
+              onClick={() => document.getElementById(id)?.scrollIntoView({ behavior:'smooth' })}
+            >{label}</button>
+          ))}
         </div>
 
         <div className="nav-actions">
