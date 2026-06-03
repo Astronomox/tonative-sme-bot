@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 
 from app.models.schemas import SMEProfile
-from app.services.llm import match_opportunities
+from app.services.llm import match_with_explanation as match_opportunities
 from data.opportunities import FUNDING_OPPORTUNITIES, get_opportunities_text
 
 logger = logging.getLogger(__name__)
