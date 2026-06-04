@@ -1,195 +1,162 @@
 import React from 'react'
 
-const WA_GREEN = '#075E54'
-const WA_LIGHT = '#ECE5DD'
-const WA_BUBBLE = '#FFFFFF'
-const WA_SENT = '#D9FDD3'
-
-function Bubble({ sent, name, children, time }) {
+/* Inline SVGs kept tiny + local so the mockup is self-contained. */
+function Chevron() {
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: sent ? 'flex-end' : 'flex-start',
-    }}>
-      <div style={{
-        maxWidth: '82%',
-        background: sent ? WA_SENT : WA_BUBBLE,
-        borderRadius: sent ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-        padding: '0.55rem 0.8rem',
-        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-        position: 'relative',
-      }}>
-        {!sent && name && (
-          <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#1A7A3C', marginBottom: 3 }}>
-            {name}
-          </div>
-        )}
-        <div style={{ fontSize: '0.72rem', lineHeight: 1.5, color: '#111' }}>{children}</div>
-        <div style={{ fontSize: '0.58rem', color: '#999', textAlign: 'right', marginTop: 2 }}>{time}</div>
-      </div>
-    </div>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
   )
 }
 
-function DateDivider({ label }) {
+function Whatsapp({ size = 19 }) {
   return (
-    <div style={{ textAlign: 'center' }}>
-      <span style={{
-        background: 'rgba(255,255,255,0.7)',
-        fontSize: '0.6rem', color: '#888',
-        padding: '0.2rem 0.8rem',
-        borderRadius: 100,
-        display: 'inline-block',
-      }}>{label}</span>
-    </div>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.13h-.01a8.2 8.2 0 0 1-4.18-1.14l-.3-.18-3.11.82.83-3.04-.2-.31a8.18 8.18 0 0 1-1.26-4.36c0-4.54 3.7-8.23 8.24-8.23a8.2 8.2 0 0 1 8.22 8.24c0 4.54-3.69 8.2-8.22 8.2Zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.13-.16.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.13-.15.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.43h-.48c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.08.14-1.18-.06-.11-.22-.17-.47-.29Z" />
+    </svg>
   )
 }
 
-export default function ChatMockup() {
+function Dots() {
   return (
-    <div style={{
-      width: 300,
-      borderRadius: 32,
-      overflow: 'hidden',
-      boxShadow: '0 0 0 8px #E8E8E8, 0 0 0 10px #DCDCDC, 0 32px 80px rgba(0,0,0,0.15)',
-      background: '#fff',
-      position: 'relative',
-    }}>
-      {/* Status bar */}
-      <div style={{
-        background: WA_GREEN,
-        padding: '0.85rem 1rem',
-        display: 'flex', alignItems: 'center', gap: '0.6rem',
-      }}>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)', display: 'flex' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M19 12H5M12 5l-7 7 7 7" />
-          </svg>
-        </button>
-        <div style={{
-          width: 34, height: 34, borderRadius: '50%',
-          background: '#25D366',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" />
-          </svg>
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: '#fff', fontSize: '0.82rem', fontWeight: 600, lineHeight: 1.2 }}>BizPadi</div>
-          <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.62rem' }}>online</div>
-        </div>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2">
-          <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
-        </svg>
-      </div>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
+    </svg>
+  )
+}
 
-      {/* Chat body */}
-      <div style={{
-        background: WA_LIGHT,
-        backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23b8a898' fill-opacity='0.12' fill-rule='evenodd'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E")`,
-        padding: '0.9rem',
-        display: 'flex', flexDirection: 'column', gap: '0.5rem',
-        minHeight: 460,
-      }}>
-        <DateDivider label="Today" />
+function Video() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
+    </svg>
+  )
+}
 
-        <Bubble name="BizPadi" time="9:41 AM">
-          Hey, good to meet you. What kind of business do you run?
-        </Bubble>
+function Star() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--gold-star)">
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    </svg>
+  )
+}
 
-        <Bubble sent time="9:42 AM">
-          I sell clothes in Aba. Been running 2 years, about 400k monthly.
-        </Bubble>
+function Send() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff">
+      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+    </svg>
+  )
+}
 
-        <Bubble name="BizPadi" time="9:42 AM">
-          Got it. Found 4 funding opportunities that match your fashion business in Aba.
-        </Bubble>
+/* variant: 'classic' | 'brand' | 'light' */
+export default function ChatMockup({ variant = 'classic' }) {
+  return (
+    <div className="phone">
+      <div className="phone-frame">
+        <div className={`phone-screen chat--${variant}`}>
+          <div className="phone-notch" />
 
-        {/* Match card */}
-        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-          <div style={{
-            background: WA_BUBBLE,
-            borderRadius: '12px 12px 12px 3px',
-            padding: '0.7rem 0.8rem',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-            maxWidth: '88%',
-          }}>
-            <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#1A7A3C', marginBottom: 6 }}>BizPadi</div>
-            <div style={{
-              background: '#EDFAF2', borderRadius: 8,
-              padding: '0.55rem 0.65rem', marginBottom: 5,
-              borderLeft: '3px solid #22C55E',
-            }}>
-              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#0C1A0E' }}>1. Tony Elumelu Foundation</div>
-              <div style={{ fontSize: '0.62rem', color: '#6B7280', marginTop: 2 }}>$5,000 seed capital. No CAC needed.</div>
-              <div style={{ fontSize: '0.58rem', color: '#16A34A', fontWeight: 700, marginTop: 3 }}>95% match</div>
+          <header className="chat-top">
+            <span className="chat-back"><Chevron /></span>
+            <span className="chat-pfp"><Whatsapp size={18} /></span>
+            <div className="chat-id">
+              <div className="chat-name">BizPadi</div>
+              <div className="chat-presence">online</div>
             </div>
-            <div style={{
-              background: '#F9F9F9', borderRadius: 8,
-              padding: '0.55rem 0.65rem',
-            }}>
-              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#0C1A0E' }}>2. SMEDAN Grant Scheme</div>
-              <div style={{ fontSize: '0.62rem', color: '#6B7280', marginTop: 2 }}>Up to 3M naira. Rolling applications.</div>
-              <div style={{ fontSize: '0.58rem', color: '#16A34A', fontWeight: 700, marginTop: 3 }}>88% match</div>
+            <div className="chat-top-icons">
+              <Video />
+              <Dots />
             </div>
-            <div style={{ fontSize: '0.58rem', color: '#999', textAlign: 'right', marginTop: 4 }}>9:42 AM</div>
+          </header>
+
+          <div className="chat-body">
+            <span className="chat-day">TODAY</span>
+
+            <div className="msg-group in">
+              <span className="msg-sender">BizPadi</span>
+              <div className="bubble in tail">
+                Hey, good to meet you. What kind of business do you run?
+                <span className="bubble-time">9:41 AM</span>
+              </div>
+            </div>
+
+            <div className="msg-group out">
+              <div className="bubble out tail">
+                I sell clothes in Aba. 2 years, about ₦400k monthly.
+                <span className="bubble-time">9:42 AM</span>
+              </div>
+            </div>
+
+            <div className="msg-group in">
+              <span className="msg-sender">BizPadi</span>
+              <div className="bubble in tail">
+                Found 4 funding opportunities that match your fashion business.
+                <span className="bubble-time">9:42 AM</span>
+              </div>
+              <div className="bubble in match-card">
+                <div className="match-row match-row--primary">
+                  <div className="match-name">Tony Elumelu Foundation</div>
+                  <div className="match-meta">$5,000 seed capital</div>
+                  <div className="match-score">95% match</div>
+                </div>
+                <div className="match-row match-row--secondary">
+                  <div className="match-name">SMEDAN Grant Scheme</div>
+                  <div className="match-meta">Up to ₦3M</div>
+                  <div className="match-score">88% match</div>
+                </div>
+                <span className="bubble-time">9:42 AM</span>
+              </div>
+            </div>
+
+            <div className="msg-group out">
+              <div className="bubble out tail">
+                This is exactly what I needed!
+                <span className="bubble-time">9:43 AM</span>
+              </div>
+            </div>
+
+            <div className="msg-group in">
+              <span className="msg-sender">BizPadi</span>
+              <div className="bubble in match-card">
+                <div className="stars">
+                  <Star /><Star /><Star /><Star /><Star />
+                </div>
+                <div className="card-strong">Applied for TEF successfully!</div>
+                <div className="card-soft">Application tracked for you</div>
+                <span className="bubble-time">9:44 AM</span>
+              </div>
+            </div>
+
+            <div className="msg-group in">
+              <div className="typing">
+                <span /><span /><span />
+              </div>
+            </div>
+          </div>
+
+          <div className="chat-input">
+            <div className="chat-input-pill">Message</div>
+            <div className="chat-send"><Send /></div>
           </div>
         </div>
-
-        <Bubble sent time="9:43 AM">
-          This is exactly what I needed. Can you help me apply for TEF?
-        </Bubble>
-
-        {/* Satisfaction card */}
-        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-          <div style={{
-            background: WA_BUBBLE,
-            borderRadius: '12px 12px 12px 3px',
-            padding: '0.75rem 0.85rem',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-            maxWidth: '88%',
-          }}>
-            <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#1A7A3C', marginBottom: 6 }}>BizPadi</div>
-            <div style={{ display: 'flex', gap: 2, marginBottom: 4 }}>
-              {[1,2,3,4,5].map(i => (
-                <svg key={i} width="11" height="11" viewBox="0 0 24 24" fill="#F59E0B">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                </svg>
-              ))}
-            </div>
-            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#0C1A0E' }}>Applied for TEF successfully!</div>
-            <div style={{ fontSize: '0.62rem', color: '#6B7280', marginTop: 2 }}>Chisom got step-by-step guidance</div>
-            <div style={{ fontSize: '0.58rem', color: '#999', textAlign: 'right', marginTop: 4 }}>9:44 AM</div>
-          </div>
-        </div>
       </div>
 
-      {/* Input bar */}
-      <div style={{
-        background: '#F0F0F0',
-        padding: '0.6rem 0.75rem',
-        display: 'flex', alignItems: 'center', gap: '0.5rem',
-        borderTop: '1px solid rgba(0,0,0,0.06)',
-      }}>
-        <div style={{
-          flex: 1, background: '#fff',
-          borderRadius: 100, padding: '0.38rem 0.75rem',
-          fontSize: '0.7rem', color: '#999',
-          fontFamily: 'Montserrat, sans-serif',
-        }}>
-          Message
-        </div>
-        <div style={{
-          width: 32, height: 32,
-          background: '#25D366', borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+      <div className="float-card float-card--matches">
+        <div className="float-label">Matched today</div>
+        <div className="float-num">4</div>
+        <div className="float-note">opportunities found</div>
+      </div>
+
+      <div className="float-card float-card--tracked">
+        <span className="float-check">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6L9 17l-5-5" />
           </svg>
+        </span>
+        <div>
+          <div className="float-strong">Application tracked</div>
+          <div className="float-sub">TEF 2026 applied</div>
         </div>
       </div>
     </div>

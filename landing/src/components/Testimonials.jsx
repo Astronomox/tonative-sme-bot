@@ -1,38 +1,36 @@
-import React, { useEffect, useRef } from 'react'
+import React from 'react'
+import { useReveal } from '../lib/useReveal'
 
-const testimonials = [
-  {
-    initials: 'AO',
-    color: '#DCFCE7',
-    textColor: '#15803D',
-    name: 'Adaeze Okonkwo',
-    biz: 'Bakery, Abuja FCT',
-    quote: 'I had no idea so many grants existed for my kind of business. BizPadi showed me five within minutes. I applied for three of them.',
-  },
+const QUOTES = [
   {
     initials: 'KA',
-    color: '#DBEAFE',
-    textColor: '#1D4ED8',
+    tone: 'blue',
     name: 'Kunle Adeyemi',
-    biz: 'Fashion Label, Lagos',
-    quote: 'I sent a voice note in Yoruba at midnight. It understood everything and came back with the TEF application steps. Very sharp.',
+    biz: 'Fashion label · Lagos',
+    quote: 'I sent a voice note in Yoruba at midnight. It understood everything and came back with the full TEF application steps. Very sharp.',
   },
   {
     initials: 'FI',
-    color: '#FCE7F3',
-    textColor: '#9D174D',
+    tone: 'pink',
     name: 'Fatima Ibrahim',
-    biz: 'Agribusiness, Kano',
-    quote: 'The reminders alone are worth everything. BizPadi pinged me two days before the BOI deadline and I submitted just in time.',
+    biz: 'Agribusiness · Kano',
+    quote: 'BizPadi pinged me two days before the BOI deadline and I submitted just in time. The reminders alone are worth everything.',
+  },
+  {
+    initials: 'AO',
+    tone: 'green',
+    name: 'Adaeze Okonkwo',
+    biz: 'Bakery · Abuja',
+    quote: 'I had no idea so many grants existed for my kind of business. BizPadi showed me five within minutes. I applied for three.',
   },
 ]
 
 function Stars() {
   return (
-    <div style={{ display: 'flex', gap: 3, marginBottom: '1rem' }}>
-      {[1,2,3,4,5].map(i => (
-        <svg key={i} width="13" height="13" viewBox="0 0 24 24" fill="#F59E0B">
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+    <div className="stars" aria-label="5 out of 5 stars">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <svg key={i} width="15" height="15" viewBox="0 0 24 24" fill="var(--gold-star)" aria-hidden="true">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
         </svg>
       ))}
     </div>
@@ -40,112 +38,28 @@ function Stars() {
 }
 
 export default function Testimonials() {
-  const ref = useRef(null)
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          entry.target.querySelectorAll('[data-reveal]').forEach((el, i) => {
-            setTimeout(() => {
-              el.style.opacity = '1'
-              el.style.transform = 'translateY(0)'
-            }, i * 100)
-          })
-          observer.unobserve(entry.target)
-        }
-      },
-      { threshold: 0.1 }
-    )
-    if (ref.current) observer.observe(ref.current)
-    return () => observer.disconnect()
-  }, [])
-
+  const ref = useReveal()
   return (
-    <section id="stories" style={{
-      padding: '8rem 3rem',
-      background: 'var(--bg)',
-      borderTop: '1px solid var(--border)',
-    }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }} ref={ref}>
-        <div data-reveal style={{
-          opacity: 0, transform: 'translateY(20px)',
-          transition: 'all 0.6s ease',
-        }}>
-          <div style={{
-            fontSize: '0.72rem', fontWeight: 700,
-            letterSpacing: '0.12em', textTransform: 'uppercase',
-            color: 'var(--green)', marginBottom: '1rem',
-          }}>
-            From SME owners
-          </div>
-          <h2 style={{
-            fontSize: 'clamp(2rem, 4vw, 3rem)',
-            fontWeight: 900, color: 'var(--ink)',
-            marginBottom: '4rem', maxWidth: 560,
-          }}>
-            The people building Nigeria{' '}
-            <em style={{ color: 'var(--green)' }}>deserve better tools.</em>
-          </h2>
+    <section className="section" id="stories" ref={ref}>
+      <div className="container">
+        <div className="section-head">
+          <div className="eyebrow reveal"><span className="eyebrow-dot" />From SME owners</div>
+          <h2 className="section-title reveal">The people building Nigeria <em>deserve better tools.</em></h2>
         </div>
 
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '1.25rem',
-        }} className="testimonials-grid">
-          {testimonials.map((t, i) => (
-            <div
-              key={i}
-              data-reveal
-              style={{
-                opacity: 0, transform: 'translateY(20px)',
-                transition: `all 0.6s ease`,
-                background: 'var(--white)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                padding: '2rem',
-                cursor: 'default',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.boxShadow = 'var(--shadow)'
-                e.currentTarget.style.transform = 'translateY(-3px)'
-                e.currentTarget.style.borderColor = '#ccc'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.boxShadow = 'none'
-                e.currentTarget.style.transform = 'translateY(0)'
-                e.currentTarget.style.borderColor = 'var(--border)'
-              }}
-            >
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '0.75rem',
-                marginBottom: '1.25rem',
-              }}>
-                <div style={{
-                  width: 42, height: 42, borderRadius: '50%',
-                  background: t.color,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: 'Fraunces, serif',
-                  fontSize: '0.85rem', fontWeight: 700,
-                  color: t.textColor,
-                  flexShrink: 0,
-                }}>
-                  {t.initials}
-                </div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--ink)' }}>{t.name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--ink-3)' }}>{t.biz}</div>
-                </div>
-              </div>
+        <div className="quotes">
+          {QUOTES.map((t) => (
+            <figure className="quote reveal" key={t.name}>
               <Stars />
-              <p style={{
-                fontSize: '0.9rem', color: 'var(--ink-2)',
-                lineHeight: 1.75, fontStyle: 'italic',
-              }}>
-                "{t.quote}"
-              </p>
-            </div>
+              <blockquote className="quote-text">&ldquo;{t.quote}&rdquo;</blockquote>
+              <figcaption className="quote-author">
+                <span className={`quote-avatar quote-avatar--${t.tone}`}>{t.initials}</span>
+                <span>
+                  <span className="quote-name">{t.name}</span>
+                  <span className="quote-biz">{t.biz}</span>
+                </span>
+              </figcaption>
+            </figure>
           ))}
         </div>
       </div>
