@@ -4,28 +4,27 @@ import logging
 from fastapi import APIRouter
 
 from app.core.config import settings
-from app.services.database import get_profile, get_conversation_history, get_db_status, get_pool
+from app.services.database import get_profile, get_conversation_history, get_pool
 from app.services.matching import get_matched_opportunities
 from app.services.llm import get_groq_status, ping_groq
 from app.models.schemas import SMEProfile
 from data.opportunities import FUNDING_OPPORTUNITIES
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api", tags=["api"])
 
 
 @router.get("/health")
 async def health_check():
+    """Lightweight health check for cron-job.org keep-alive ping."""
     return {
         "status": "ok",
-        "service": "tonative-sme-bot",
-        "version": "2.0.0",
+        "service": "bizpadi",
+        "version": "3.0.0",
         "integrations": {
             "groq": settings.groq_enabled,
+            "aethex": settings.aethex_enabled,
             "postgres": bool(settings.DATABASE_URL),
-            "tonative": settings.tonative_enabled,
-            "elevenlabs": settings.elevenlabs_enabled,
             "twilio": bool(settings.TWILIO_ACCOUNT_SID),
         },
     }
@@ -33,23 +32,22 @@ async def health_check():
 
 @router.get("/status")
 async def live_status():
-    """Live status dashboard. Pings each service."""
+    """Full live status — pings every service."""
     results = {}
 
-    # --- Groq ---
+    # Groq
     groq_result = await ping_groq()
     results["groq"] = {
         "configured": settings.groq_enabled,
         "reachable": groq_result["ok"],
-        "latency_ms": groq_result["latency_ms"],
-        "error": groq_result["error"],
+        "latency_ms": groq_result.get("latency_ms", 0),
+        "error": groq_result.get("error"),
     }
 
-    # --- PostgreSQL ---
+    # PostgreSQL
     db_latency = 0
     db_reachable = False
     db_error = None
-
     if settings.DATABASE_URL:
         try:
             start = time.monotonic()
@@ -62,7 +60,7 @@ async def live_status():
         except Exception as e:
             db_error = str(e)
     else:
-        db_reachable = True  # in-memory is always up
+        db_reachable = True
 
     results["database"] = {
         "configured": bool(settings.DATABASE_URL),
@@ -72,11 +70,10 @@ async def live_status():
         "error": db_error,
     }
 
-    # --- Twilio ---
+    # Twilio
     twilio_reachable = False
     twilio_latency = 0
     twilio_error = None
-
     if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
         try:
             import httpx
@@ -100,18 +97,21 @@ async def live_status():
         "error": twilio_error,
     }
 
-    # --- Tonative ---
-    results["tonative"] = {
-        "configured": settings.tonative_enabled,
-        "fallback_active": not settings.tonative_enabled,
-        "note": "Waiting for hackathon docs" if not settings.tonative_enabled else "Connected",
-    }
-
-    # --- ElevenLabs ---
-    results["elevenlabs"] = {
-        "configured": settings.elevenlabs_enabled,
-        "note": "Optional for voice replies",
-    }
+    # AethexAI
+    try:
+        from app.services.aethex import ping_aethex, get_aethex_status
+        aethex_ping = await ping_aethex()
+        aethex_status_data = get_aethex_status()
+        results["aethex"] = {
+            "configured": settings.aethex_enabled,
+            "reachable": aethex_ping.get("ok", False),
+            "latency_ms": aethex_ping.get("latency_ms", 0),
+            "error": aethex_ping.get("error"),
+            "tts": aethex_status_data.get("tts", {}),
+            "transcription": aethex_status_data.get("transcription", {}),
+        }
+    except Exception as e:
+        results["aethex"] = {"configured": settings.aethex_enabled, "error": str(e)}
 
     critical_ok = results["groq"]["reachable"] and results["database"]["reachable"]
 
@@ -163,7 +163,6 @@ async def get_user_history(phone_number: str):
 
 @router.get("/applications/{phone_number}")
 async def get_user_applications(phone_number: str):
-    """Get application tracking for a user."""
     if not phone_number.startswith("whatsapp:"):
         phone_number = f"whatsapp:+{phone_number.lstrip('+')}"
     from app.services.database import get_applications
@@ -173,7 +172,6 @@ async def get_user_applications(phone_number: str):
 
 @router.post("/reminders/send-deadline-alerts")
 async def trigger_deadline_reminders():
-    """Trigger deadline reminders for all active applications. Call from cron."""
     from app.services.reminders import send_deadline_reminders
     sent = await send_deadline_reminders()
     return {"status": "ok", "reminders_sent": sent}
@@ -181,21 +179,6 @@ async def trigger_deadline_reminders():
 
 @router.post("/reminders/send-weekly-digest")
 async def trigger_weekly_digest():
-    """Send weekly opportunity digest to all profiled users. Call from cron."""
     from app.services.reminders import send_new_opportunity_alerts
     sent = await send_new_opportunity_alerts()
     return {"status": "ok", "notifications_sent": sent}
-
-
-@router.get("/api/aethex/status")
-async def aethex_status():
-    """Check AethexAI API health — TTS + transcription."""
-    from app.services.aethex import ping_aethex, get_aethex_status
-    ping_result = await ping_aethex()
-    current = get_aethex_status()
-    return {
-        "aethex_enabled": settings.aethex_enabled,
-        "ping": ping_result,
-        "last_transcription": current["transcription"],
-        "last_tts": current["tts"],
-    }
