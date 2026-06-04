@@ -16,18 +16,8 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 @router.get("/health")
 async def health_check():
-    """Lightweight health check for cron-job.org keep-alive ping."""
-    return {
-        "status": "ok",
-        "service": "bizpadi",
-        "version": "3.0.0",
-        "integrations": {
-            "groq": settings.groq_enabled,
-            "aethex": settings.aethex_enabled,
-            "postgres": bool(settings.DATABASE_URL),
-            "twilio": bool(settings.TWILIO_ACCOUNT_SID),
-        },
-    }
+    """Minimal keep-alive ping for cron-job.org."""
+    return {"status": "ok"}
 
 
 @router.get("/status")
