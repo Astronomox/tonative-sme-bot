@@ -63,13 +63,29 @@ def detect_language_switch(text: str) -> Optional[str]:
 
 def _inject_language(system: str, language: str) -> str:
     """Inject language instruction into system prompt."""
-    lang_name = LANGUAGE_NAMES.get(language, "English")
     if language == "en":
         return system
+
+    # For French and Pidgin: LLM handles these well natively
+    if language in ("fr", "pcm"):
+        lang_name = LANGUAGE_NAMES.get(language)
+        return system + (
+            f"\n\nIMPORTANT: Respond in {lang_name}. Be natural and fluent."
+        )
+
+    # For Yoruba, Hausa, Arabic: LLM is NOT fluent enough to generate well.
+    # Instead: think in English internally, then translate your response.
+    # This prevents repetitive hallucination garbage.
+    lang_name = LANGUAGE_NAMES.get(language, "English")
     return system + (
-        f"\n\nCRITICAL: Respond ONLY in {lang_name}. "
-        f"Every single word must be in {lang_name}. "
-        f"Do not switch to English under any circumstances."
+        f"\n\nIMPORTANT: The user speaks {lang_name}. "
+        f"Compose your response in clear simple English first, "
+        f"then translate it accurately into {lang_name}. "
+        f"Keep the translation SHORT and NATURAL. "
+        f"If you are not certain of a {lang_name} phrase, use simple English words "
+        f"that a {lang_name} speaker would understand rather than guessing. "
+        f"DO NOT repeat phrases. DO NOT fill space with similar-sounding words. "
+        f"If a sentence is done, stop."
     )
 
 

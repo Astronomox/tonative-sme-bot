@@ -13,6 +13,24 @@ from app.services.aethex import cleanup_old_tts_files, TTS_CACHE_DIR
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Deduplication: prevent processing same message twice
+# (happens when voice notes take too long and Twilio retries)
+import hashlib
+_processed_messages: dict[str, float] = {}
+_DEDUP_TTL = 30.0  # seconds
+
+def _is_duplicate(phone: str, body: str, media_url: str) -> bool:
+    key = hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
+    now = __import__('time').time()
+    # Clean old entries
+    expired = [k for k, t in _processed_messages.items() if now - t > _DEDUP_TTL]
+    for k in expired:
+        del _processed_messages[k]
+    if key in _processed_messages:
+        return True
+    _processed_messages[key] = now
+    return False
+
 
 def _twiml_text(text: str) -> str:
     """TwiML with text only."""
@@ -69,6 +87,11 @@ async def whatsapp_webhook(request: Request):
         f"body='{body[:60]}' | media={num_media} | type={media_content_type}"
     )
 
+    # Deduplication guard — prevents double replies when Twilio retries
+    if _is_duplicate(phone_number, body or "", media_url or ""):
+        logger.info(f"Duplicate message from {phone_number}, skipping")
+        return Response(content=_twiml_text(""), media_type="text/xml")
+
     # ── Signature verification ────────────────────────────────────────────────
     if settings.TWILIO_AUTH_TOKEN:
         try:
@@ -95,7 +118,7 @@ async def whatsapp_webhook(request: Request):
                 num_media=num_media,
                 media_content_type=media_content_type,
             ),
-            timeout=12.0,
+            timeout=25.0,
         )
     except asyncio.TimeoutError:
         logger.error(f"Message processing timed out for {phone_number}")
