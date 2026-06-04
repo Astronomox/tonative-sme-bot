@@ -97,6 +97,14 @@ async def handle_incoming_message(
         audio = await _maybe_tts(msg, new_lang, is_voice)
         return {"text_response": msg, "audio_path": audio}
 
+    # Handle Twilio sandbox activation phrase
+    if user_text.lower().strip() in ("join industry-plain", "join industry plain"):
+        msg = LANGUAGE_MENU if profile.state == UserState.LANGUAGE_SELECT else (
+            "You are connected to BizPadi!\n\nType *menu* to see what I can do, or just tell me about your business."
+        )
+        await save_message(phone_number, "assistant", msg)
+        return {"text_response": msg, "audio_path": None}
+
     await save_message(phone_number, "user", user_text)
     response = await _process(profile, user_text, is_voice)
     await save_message(phone_number, "assistant", response)

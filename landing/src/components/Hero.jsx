@@ -1,4 +1,4 @@
-const WA = 'https://wa.me/14155238886?text=Hello%2C%20I%20want%20to%20find%20funding%20for%20my%20business'
+const WA = 'https://wa.me/14155238886?text=join%20industry-plain'
 
 function ChatPreview() {
   return (
