@@ -1,3 +1,4 @@
+# BizPadi build: 2026-06-06 22:17:17
 LANGUAGE_MENU = """Welcome to BizPadi!
 
 I help Nigerian SMEs find grants, loans, and funding that actually fits their business.

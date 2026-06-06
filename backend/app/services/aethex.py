@@ -1,3 +1,4 @@
+# BizPadi build: 2026-06-06 22:17:17
 """
 AethexAI service.
 Active: transcribe_audio()   voice note transcription (EN/FR primary, Groq fallback)
