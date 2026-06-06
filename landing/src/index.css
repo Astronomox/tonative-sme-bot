@@ -1200,3 +1200,108 @@ button { cursor: pointer; font-family: inherit; color: inherit; }
 
   .footer-grid { grid-template-columns: 1fr; gap: 2.25rem; }
 }
+
+/* ============================================================
+   MOBILE POLISH — tight, readable, everything in place
+   ============================================================ */
+
+/* ── 680px: existing breakpoint — improvements ── */
+@media (max-width: 680px) {
+  :root { --section-y: 3.75rem; }
+
+  /* Hero tighter */
+  .hero { padding: 5.5rem 0 2rem; }
+  .hero-title { font-size: clamp(2.4rem, 10vw, 3rem); }
+  .hero-lead { font-size: 0.97rem; margin-bottom: 1.75rem; }
+  .hero-ctas { gap: 0.65rem; }
+  .hero-ctas .btn { font-size: 0.88rem; padding: 0.82rem 1.4rem; }
+
+  /* Phone fits in viewport */
+  .phone { width: 290px; }
+  .chat-body { min-height: 370px; }
+
+  /* Float cards: scale down more, tuck in */
+  .float-card { transform: scale(0.78); transform-origin: top right; }
+  .float-card--matches { right: -2%; top: 1%; }
+  .float-card--tracked { left: -2%; bottom: 2%; transform: scale(0.78); transform-origin: bottom left; }
+
+  /* Sections */
+  .section-title { font-size: clamp(1.8rem, 7.5vw, 2.4rem); }
+  .section-lead { font-size: 0.92rem; }
+  .feature { padding: 1.5rem 1.3rem; }
+  .feature-title { font-size: 1.05rem; }
+  .quote { padding: 1.5rem 1.3rem; }
+  .quote-text { font-size: 0.9rem; }
+
+  /* Steps: smaller number circles */
+  .step-num { width: 52px; height: 52px; font-size: 1.1rem; }
+  .step { grid-template-columns: 52px 1fr; }
+
+  /* CTA tighter */
+  .cta { padding: 5rem 0; }
+  .cta-title { font-size: clamp(2rem, 8.5vw, 2.8rem); }
+  .cta-lead { font-size: 0.95rem; margin-bottom: 2rem; }
+  .cta-btn { font-size: 0.95rem; padding: 0.95rem 2rem; }
+
+  /* Footer compact */
+  .footer { padding: 2.25rem 0; }
+  .footer-bottom { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+}
+
+/* ── 420px: very small phones (iPhone SE, Galaxy A series) ── */
+@media (max-width: 420px) {
+  :root { --section-y: 3rem; }
+  .container { padding: 0 1.1rem; }
+
+  /* Nav */
+  .nav { padding: 0 1.1rem; }
+
+  /* Hero */
+  .hero { padding: 5rem 0 1.75rem; }
+  .hero-badge { font-size: 0.65rem; padding: 0.35rem 0.8rem; }
+  .hero-title { font-size: clamp(2.1rem, 9.5vw, 2.6rem); letter-spacing: -0.03em; }
+  .hero-lead { font-size: 0.92rem; line-height: 1.65; max-width: 100%; }
+  .hero-ctas { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  .hero-ctas .btn { justify-content: center; width: 100%; }
+  .hero-trust { margin-top: 0.25rem; }
+
+  /* Phone: fits snugly */
+  .phone { width: 268px; }
+  .phone-frame { border-radius: 38px; padding: 9px; }
+  .phone-screen { border-radius: 30px; }
+  .chat-body { min-height: 340px; }
+  .chat-top { padding: 1.4rem 0.75rem 0.6rem; }
+  .bubble { font-size: 0.7rem; padding: 0.38rem 0.55rem 0.3rem; }
+
+  /* Float cards: hide on very small — they just overflow */
+  .float-card--matches { display: none; }
+  .float-card--tracked { display: none; }
+
+  /* Sections */
+  .section-title { font-size: clamp(1.65rem, 7vw, 2.1rem); }
+  .section-lead { font-size: 0.9rem; }
+  .feature { padding: 1.3rem 1.1rem; }
+  .feature-icon { width: 40px; height: 40px; }
+  .feature-title { font-size: 1rem; }
+  .feature-desc { font-size: 0.86rem; }
+
+  /* Steps */
+  .step-num { width: 46px; height: 46px; font-size: 1rem; flex-shrink: 0; }
+  .step { grid-template-columns: 46px 1fr; gap: 1rem; }
+  .step-title { font-size: 1.05rem; }
+  .step-desc { font-size: 0.86rem; }
+
+  /* Testimonials */
+  .quote-text { font-size: 0.87rem; }
+  .quote-name { font-size: 0.88rem; }
+  .quote-biz { font-size: 0.76rem; }
+
+  /* CTA */
+  .cta { padding: 4rem 0; }
+  .cta-title { font-size: clamp(1.8rem, 8vw, 2.4rem); }
+  .cta-lead { font-size: 0.9rem; }
+  .cta-btn { width: 100%; justify-content: center; font-size: 0.95rem; }
+
+  /* WA widget smaller */
+  .wa-fab { width: 50px; height: 50px; }
+}
