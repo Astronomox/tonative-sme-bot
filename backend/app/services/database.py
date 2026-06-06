@@ -374,7 +374,7 @@ async def update_application_status(
 
 
 async def get_all_active_applications() -> list[dict]:
-    """For deadline reminders — get all pending applications across all users."""
+    """For deadline reminders   get all pending applications across all users."""
     pool = await get_pool()
     if pool:
         try:
@@ -394,3 +394,32 @@ async def get_all_active_applications() -> list[dict]:
     for apps in _memory_applications.values():
         all_apps.extend([a for a in apps if a.get("status") in ("applied", "pending")])
     return all_apps
+
+
+# ===================================================================
+# DOCUMENT FLOW SESSION PERSISTENCE
+# ===================================================================
+
+async def save_doc_session(phone_number: str, session: dict):
+    """Persist document flow session so it survives Render restarts."""
+    import json
+    await save_message(phone_number, "system", f"[DOC_SESSION:{json.dumps(session)}]")
+
+
+async def load_doc_session(phone_number: str) -> dict:
+    """Load the most recent document flow session for a user."""
+    import json
+    history = await get_conversation_history(phone_number, limit=30)
+    for msg in reversed(history):
+        content = msg.get("content", "")
+        if content.startswith("[DOC_SESSION:"):
+            try:
+                return json.loads(content[len("[DOC_SESSION:"):].rstrip("]"))
+            except Exception:
+                pass
+    return {}
+
+
+async def clear_doc_session(phone_number: str):
+    """Clear document session by saving an empty marker."""
+    await save_message(phone_number, "system", "[DOC_SESSION:{}]")

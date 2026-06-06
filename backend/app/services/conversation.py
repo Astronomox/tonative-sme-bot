@@ -7,6 +7,7 @@ from app.services.database import (
     get_profile, upsert_profile, update_profile_fields,
     save_message, format_history_for_llm,
     track_application, get_applications,
+    save_doc_session, load_doc_session, clear_doc_session,
 )
 from app.services.llm import (
     chat_with_sme, extract_profile_data,
@@ -48,9 +49,27 @@ YES_WORDS = {"yes", "yep", "yeah", "yh", "y", "sure", "i have", "i do",
 NO_WORDS = {"no", "nope", "nah", "don't", "dont", "i don't", "i dont",
             "rara", "a'a", "non", "a'a"}
 
-# Track active document flow sessions
-_doc_flow_sessions: dict[str, dict] = {}
-# phone -> {"opp_id": str, "opp_name": str, "current_doc": str}
+# Document flow sessions are persisted to DB   survives Render restarts
+_doc_flow_sessions: dict[str, dict] = {}  # local cache for speed
+
+
+async def _get_doc_session(phone: str) -> dict:
+    if phone in _doc_flow_sessions:
+        return _doc_flow_sessions[phone]
+    session = await load_doc_session(phone)
+    if session:
+        _doc_flow_sessions[phone] = session
+    return session
+
+
+async def _set_doc_session(phone: str, session: dict):
+    _doc_flow_sessions[phone] = session
+    await save_doc_session(phone, session)
+
+
+async def _del_doc_session(phone: str):
+    _doc_flow_sessions.pop(phone, None)
+    await clear_doc_session(phone)
 
 
 async def handle_incoming_message(
@@ -113,11 +132,8 @@ async def handle_incoming_message(
 
 
 async def _maybe_tts(text: str, language: str, user_sent_voice: bool) -> Optional[Path]:
-    if not user_sent_voice or language not in ("en", "fr"):
-        return None
-    clean = text.replace("*", "").replace("_", "").replace("\n\n", " ").replace("\n", " ")
-    clean = clean[:500] + "..." if len(clean) > 500 else clean
-    return await aethex.text_to_speech(clean, language)
+    # TTS disabled   causes slowness and conflicts with WhatsApp timeout
+    return None
 
 
 async def _process(profile: SMEProfile, user_text: str, is_voice: bool) -> str:
@@ -129,14 +145,14 @@ async def _process(profile: SMEProfile, user_text: str, is_voice: bool) -> str:
         return await _handle_language_selection(profile, user_text)
 
     # Document flow   intercept yes/no answers
-    session = _doc_flow_sessions.get(profile.phone_number)
+    session = await _get_doc_session(profile.phone_number)
     if session:
         if any(w in lower for w in YES_WORDS):
             return await _handle_doc_yes(profile, session)
         elif any(w in lower for w in NO_WORDS):
             return await _handle_doc_no(profile, session)
         elif lower in ("stop", "quit", "exit", "done", "finish"):
-            del _doc_flow_sessions[profile.phone_number]
+            await _del_doc_session(profile.phone_number)
             score, missing = calculate_readiness_score(profile.phone_number, session["opp_id"])
             return build_readiness_summary(profile.phone_number, session["opp_id"], session["opp_name"], lang)
         # If they said something else during doc flow, pause and answer then resume
@@ -236,10 +252,10 @@ async def _handle_doc_yes(profile: SMEProfile, session: dict) -> str:
     next_doc = get_next_unchecked_document(profile.phone_number, opp_id)
     if next_doc:
         session["current_doc"] = next_doc
-        _doc_flow_sessions[profile.phone_number] = session
+        await _set_doc_session(profile.phone_number, session)
         return f"{affirmation} {build_document_question(next_doc, lang)}"
     else:
-        del _doc_flow_sessions[profile.phone_number]
+        await _del_doc_session(profile.phone_number)
         return build_readiness_summary(profile.phone_number, opp_id, opp_name, lang)
 
 
@@ -258,7 +274,7 @@ async def _handle_doc_no(profile: SMEProfile, session: dict) -> str:
     next_doc = get_next_unchecked_document(profile.phone_number, opp_id)
     if next_doc:
         session["current_doc"] = next_doc
-        _doc_flow_sessions[profile.phone_number] = session
+        await _set_doc_session(profile.phone_number, session)
         continues = {
             "en": "\n\nWhen you have it, come back. Or reply *skip* to continue to the next document now.",
             "pcm": "\n\nWhen you get am, come back. Or say *skip* to continue to the next one.",
@@ -266,7 +282,7 @@ async def _handle_doc_no(profile: SMEProfile, session: dict) -> str:
         }
         return instructions + continues.get(lang, continues["en"])
     else:
-        del _doc_flow_sessions[profile.phone_number]
+        await _del_doc_session(profile.phone_number)
         return instructions + "\n\n" + build_readiness_summary(profile.phone_number, opp_id, opp_name, lang)
 
 
@@ -307,7 +323,7 @@ async def _handle_reset(profile: SMEProfile) -> str:
         setattr(profile, f, None)
     await upsert_profile(profile)
     if profile.phone_number in _doc_flow_sessions:
-        del _doc_flow_sessions[profile.phone_number]
+        await _del_doc_session(profile.phone_number)
     return f"Fresh start.\n\n{LANGUAGE_MENU}"
 
 

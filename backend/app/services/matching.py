@@ -73,7 +73,7 @@ def format_opportunities_for_whatsapp(matches: list[dict]) -> str:
             "Things that will help:\n"
             "Register your business with CAC\n"
             "Build up 6 months of bank statements\n"
-            "Check back — new opportunities come in regularly\n\n"
+            "Check back   new opportunities come in regularly\n\n"
             "Type *find new* to search for the latest opportunities."
         )
 

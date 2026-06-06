@@ -47,7 +47,7 @@ FUNDING_OPPORTUNITIES = [
             "are prioritised."
         ),
         "amount": "N500,000 to N500 million at 9% interest per annum",
-        "deadline": "Rolling applications — always open",
+        "deadline": "Rolling applications   always open",
         "eligibility_sectors": ["agriculture", "manufacturing", "technology", "food", "textile", "all"],
         "eligibility_stages": ["early", "growing", "established"],
         "eligibility_locations": ["all"],
@@ -87,7 +87,7 @@ FUNDING_OPPORTUNITIES = [
             "cluster development, and market access programmes."
         ),
         "amount": "Grants up to N2 million; Equipment support valued at N500k-N5M",
-        "deadline": "Rolling — check smedan.gov.ng for current windows",
+        "deadline": "Rolling   check smedan.gov.ng for current windows",
         "eligibility_sectors": ["all"],
         "eligibility_stages": ["early", "growing"],
         "eligibility_locations": ["all"],
@@ -136,7 +136,7 @@ FUNDING_OPPORTUNITIES = [
             "Letter of introduction from LGA or community leader (recommended)",
             "Business plan or project proposal",
             "Bank account details",
-            "CAC certificate (if registered — not mandatory for micro level)",
+            "CAC certificate (if registered   not mandatory for micro level)",
         ],
         "application_steps": [
             "Register on the NIRSAL Microfinance Bank portal at nmfb.com.ng",
@@ -191,7 +191,7 @@ FUNDING_OPPORTUNITIES = [
             "Open to both registered and unregistered businesses."
         ),
         "amount": "N50,000 to N5 million at 5%-10% per annum",
-        "deadline": "Rolling applications — Lagos residents only",
+        "deadline": "Rolling applications   Lagos residents only",
         "eligibility_sectors": ["all"],
         "eligibility_stages": ["idea", "early", "growing"],
         "eligibility_locations": ["Lagos"],
@@ -226,7 +226,7 @@ FUNDING_OPPORTUNITIES = [
             "of active funding opportunities, competitions, and accelerator programmes "
             "relevant to Nigerian businesses."
         ),
-        "amount": "Varies by programme — from grants to equity investments up to $500,000",
+        "amount": "Varies by programme   from grants to equity investments up to $500,000",
         "deadline": "Multiple deadlines throughout the year",
         "eligibility_sectors": ["technology", "agriculture", "health", "education", "fintech", "all"],
         "eligibility_stages": ["idea", "early", "growing"],
@@ -259,7 +259,7 @@ FUNDING_OPPORTUNITIES = [
             "businesses with impact in their communities."
         ),
         "amount": "$100,000 for regional winners; $30,000 for finalists",
-        "deadline": "Applications open annually — check vc4a.com/cartier-womens-initiative",
+        "deadline": "Applications open annually   check vc4a.com/cartier-womens-initiative",
         "eligibility_sectors": ["all"],
         "eligibility_stages": ["early", "growing"],
         "eligibility_locations": ["all"],
@@ -291,7 +291,7 @@ FUNDING_OPPORTUNITIES = [
             "entrepreneurs and agribusiness operators."
         ),
         "amount": "N500,000 to N50 million depending on product",
-        "deadline": "Always open — walk into any Fidelity Bank branch",
+        "deadline": "Always open   walk into any Fidelity Bank branch",
         "eligibility_sectors": ["all"],
         "eligibility_stages": ["growing", "established"],
         "eligibility_locations": ["all"],
@@ -328,7 +328,7 @@ FUNDING_OPPORTUNITIES = [
             "through microfinance banks, development finance institutions, and cooperatives."
         ),
         "amount": "N50,000 to N500,000 (micro) / up to N10M (SME tier)",
-        "deadline": "Rolling — apply through participating microfinance banks",
+        "deadline": "Rolling   apply through participating microfinance banks",
         "eligibility_sectors": ["all"],
         "eligibility_stages": ["idea", "early", "growing"],
         "eligibility_locations": ["all"],
@@ -341,7 +341,7 @@ FUNDING_OPPORTUNITIES = [
             "Passport photograph",
             "Proof of business activity",
             "Bank account details (active account at a microfinance bank)",
-            "CAC certificate (for SME tier — not required for micro tier)",
+            "CAC certificate (for SME tier   not required for micro tier)",
             "Business plan or loan purpose statement",
         ],
         "application_steps": [

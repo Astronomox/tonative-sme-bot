@@ -22,7 +22,7 @@ async def health_check():
 
 @router.get("/status")
 async def live_status():
-    """Full live status — pings every service."""
+    """Full live status   pings every service."""
     results = {}
 
     # Groq

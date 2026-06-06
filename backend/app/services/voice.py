@@ -1,5 +1,5 @@
 """
-Voice service — Groq Whisper transcription.
+Voice service   Groq Whisper transcription.
 Used as the fallback when Aethex transcription is unavailable,
 and as primary for Yoruba, Hausa, Arabic, Pidgin.
 """
@@ -75,10 +75,10 @@ async def download_twilio_media(media_url: str) -> Optional[bytes]:
                 headers={"Accept": "*/*"},
             )
             if response.status_code == 401:
-                logger.error("Twilio media 401 — check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
+                logger.error("Twilio media 401   check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
                 return None
             if response.status_code == 404:
-                logger.error("Twilio media 404 — message may have expired")
+                logger.error("Twilio media 404   message may have expired")
                 return None
             response.raise_for_status()
             content = response.content

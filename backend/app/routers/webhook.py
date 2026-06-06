@@ -1,175 +1,76 @@
 import asyncio
+import hashlib
 import logging
-from pathlib import Path
+import time
+from typing import Optional
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import FileResponse
 
 from app.services.conversation import handle_incoming_message
-from app.services.whatsapp import send_whatsapp_message
 from app.core.config import settings
-from app.services.aethex import cleanup_old_tts_files, TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Deduplication: prevent processing same message twice
-# (happens when voice notes take too long and Twilio retries)
-import hashlib
-_processed_messages: dict[str, float] = {}
-_DEDUP_TTL = 30.0  # seconds
+# Deduplication   prevents double replies when Twilio retries on slow responses
+_seen: dict[str, float] = {}
+_DEDUP_TTL = 30.0
+
 
 def _is_duplicate(phone: str, body: str, media_url: str) -> bool:
     key = hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
-    now = __import__('time').time()
-    # Clean old entries
-    expired = [k for k, t in _processed_messages.items() if now - t > _DEDUP_TTL]
-    for k in expired:
-        del _processed_messages[k]
-    if key in _processed_messages:
+    now = time.time()
+    _seen.update({k: v for k, v in _seen.items() if now - v < _DEDUP_TTL})
+    if key in _seen:
         return True
-    _processed_messages[key] = now
+    _seen[key] = now
     return False
 
 
-def _twiml_text(text: str) -> str:
-    """TwiML with text only."""
-    escaped = (
-        text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
+def _twiml(text: str) -> str:
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped}</Message></Response>'
-
-
-def _twiml_text_and_audio(text: str, audio_url: str) -> str:
-    """TwiML with text + audio media."""
-    escaped = (
-        text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-    return (
-        f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<Response>'
-        f'<Message>{escaped}<Media>{audio_url}</Media></Message>'
-        f'</Response>'
-    )
-
-
-def _twiml_error(message: str) -> str:
-    return _twiml_text(message)
 
 
 @router.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
-    """Main Twilio WhatsApp webhook."""
-
-    # ── Parse form data ──────────────────────────────────────────────────────
     try:
-        form_data = await request.form()
+        form = await request.form()
     except Exception as e:
-        logger.error(f"Failed to parse form data: {e}")
-        return Response(content=_twiml_error("Sorry, something went wrong."), media_type="text/xml")
+        logger.error(f"Form parse error: {e}")
+        return Response(content=_twiml("Something went wrong. Try again."), media_type="text/xml")
 
-    phone_number = form_data.get("From", "")
-    body = form_data.get("Body", "")
-    num_media = int(form_data.get("NumMedia", "0"))
-    media_url = form_data.get("MediaUrl0")
-    media_content_type = form_data.get("MediaContentType0", "audio/ogg")
+    phone = form.get("From", "")
+    body = form.get("Body", "")
+    num_media = int(form.get("NumMedia", "0"))
+    media_url = form.get("MediaUrl0")
+    media_type = form.get("MediaContentType0", "audio/ogg")
 
-    logger.info(
-        f"Incoming | from={phone_number} | "
-        f"body='{body[:60]}' | media={num_media} | type={media_content_type}"
-    )
+    logger.info(f"IN | {phone} | body='{body[:60]}' | media={num_media}")
 
-    # Deduplication guard — prevents double replies when Twilio retries
-    if _is_duplicate(phone_number, body or "", media_url or ""):
-        logger.info(f"Duplicate message from {phone_number}, skipping")
-        return Response(content=_twiml_text(""), media_type="text/xml")
+    if _is_duplicate(phone, body or "", media_url or ""):
+        logger.info(f"Duplicate from {phone}, skipping")
+        return Response(content=_twiml(""), media_type="text/xml")
 
-    # ── Signature verification ────────────────────────────────────────────────
-    if settings.TWILIO_AUTH_TOKEN:
-        try:
-            from twilio.request_validator import RequestValidator
-            validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
-            url = str(request.url)
-            signature = request.headers.get("X-Twilio-Signature", "")
-            params = dict(form_data)
-            if not validator.validate(url, params, signature):
-                logger.warning(f"Invalid Twilio signature from {phone_number}")
-                # Log but don't reject — sandbox may differ
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.warning(f"Signature validation error: {e}")
-
-    # ── Process with 12s timeout ──────────────────────────────────────────────
     try:
         result = await asyncio.wait_for(
             handle_incoming_message(
-                phone_number=phone_number,
+                phone_number=phone,
                 body=body,
                 media_url=media_url,
                 num_media=num_media,
-                media_content_type=media_content_type,
+                media_content_type=media_type,
             ),
-            timeout=25.0,
+            timeout=20.0,
         )
     except asyncio.TimeoutError:
-        logger.error(f"Message processing timed out for {phone_number}")
+        logger.error(f"Timeout for {phone}")
         return Response(
-            content=_twiml_text(
-                "Taking longer than usual. Your message is being processed — I'll reply shortly!"
-            ),
+            content=_twiml("Processing your message   I will reply in a moment."),
             media_type="text/xml",
         )
     except Exception as e:
-        logger.error(f"Unhandled error for {phone_number}: {e}", exc_info=True)
-        return Response(
-            content=_twiml_error("Something went wrong. Please try again!"),
-            media_type="text/xml",
-        )
+        logger.error(f"Error for {phone}: {e}", exc_info=True)
+        return Response(content=_twiml("Something went wrong. Try again."), media_type="text/xml")
 
-    # ── Build response ────────────────────────────────────────────────────────
-    text_response = result.get("text_response", "")
-    audio_path: Path = result.get("audio_path")
-
-    if audio_path and audio_path.exists():
-        # Serve audio back as WhatsApp media
-        audio_filename = audio_path.name
-        audio_url = f"{settings.PUBLIC_URL}/media/tts/{audio_filename}"
-        logger.info(f"Sending voice reply: {audio_url}")
-        twiml = _twiml_text_and_audio(text_response, audio_url)
-    else:
-        twiml = _twiml_text(text_response)
-
-    # Clean up old TTS files in background
-    asyncio.create_task(_cleanup())
-
-    return Response(content=twiml, media_type="text/xml")
-
-
-async def _cleanup():
-    try:
-        cleanup_old_tts_files(max_age_seconds=300)
-    except Exception:
-        pass
-
-
-@router.get("/media/tts/{filename}")
-async def serve_tts_audio(filename: str):
-    """Serve TTS WAV files for WhatsApp media replies."""
-    # Sanitize filename — no path traversal
-    if "/" in filename or ".." in filename:
-        return Response(status_code=400)
-
-    path = TTS_CACHE_DIR / filename
-    if not path.exists() or not path.is_file():
-        return Response(status_code=404)
-
-    return FileResponse(path, media_type="audio/wav")
+    return Response(content=_twiml(result.get("text_response", "")), media_type="text/xml")

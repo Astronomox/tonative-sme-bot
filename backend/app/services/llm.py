@@ -33,7 +33,7 @@ LANGUAGE_NAMES = {
     "ar": "Arabic",
 }
 
-# Language switch phrases — detect these mid-conversation
+# Language switch phrases   detect these mid-conversation
 LANGUAGE_SWITCH_PATTERNS = {
     "en": ["speak english", "english please", "switch to english", "use english",
            "let's speak english", "change to english", "english"],
@@ -45,6 +45,8 @@ LANGUAGE_SWITCH_PATTERNS = {
             "use pidgin", "make we do pidgin"],
     "fr": ["speak french", "french please", "switch to french", "français",
            "parle français", "en français", "french"],
+    "ar": ["speak arabic", "arabic please", "switch to arabic", "use arabic",
+           "arabic", "عربي"],
 }
 
 
@@ -152,7 +154,7 @@ async def chat_with_sme(
     user_message: str,
     language: str = "en",
 ) -> Optional[str]:
-    """Main conversation — responds in user's chosen language."""
+    """Main conversation   responds in user's chosen language."""
     system = _inject_language(SYSTEM_PROMPT, language)
     messages = [{"role": "system", "content": system}]
     messages.extend(conversation_history[-16:])  # last 16 messages for context

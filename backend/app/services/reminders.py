@@ -86,7 +86,7 @@ async def send_deadline_reminders():
             elif urgency == "soon":
                 message = (
                     f"📅 *BizPadi Update*\n\n"
-                    f"Quick heads up — *{opp['name']}* deadline is coming up next month.\n\n"
+                    f"Quick heads up   *{opp['name']}* deadline is coming up next month.\n\n"
                     f"⏰ Deadline: {opp['deadline']}\n"
                     f"💰 Amount: {opp['amount']}\n\n"
                     f"Reply *steps* to get the application guide again, or tell me where you're stuck! 💪"
@@ -150,9 +150,9 @@ async def send_followup_check(phone_number: str, opportunity_name: str):
         f"Hey! 👋 BizPadi checking in.\n\n"
         f"Did you get a chance to apply for *{opportunity_name}*? 🤞\n\n"
         f"Reply:\n"
-        f"• *applied* — I'll track it for you\n"
-        f"• *help* — if you're stuck somewhere\n"
-        f"• *skip* — if you decided not to apply\n\n"
+        f"• *applied*   I'll track it for you\n"
+        f"• *help*   if you're stuck somewhere\n"
+        f"• *skip*   if you decided not to apply\n\n"
         f"We're rooting for you! 💪"
     )
     await send_whatsapp_message(phone_number, message)
