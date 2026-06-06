@@ -67,7 +67,7 @@ async def whatsapp_webhook(request: Request):
     except asyncio.TimeoutError:
         logger.error(f"Timeout for {phone}")
         return Response(
-            content=_twiml("Processing your message   I will reply in a moment."),
+            content=_twiml("Processing your message. I will reply in a moment."),
             media_type="text/xml",
         )
     except Exception as e:

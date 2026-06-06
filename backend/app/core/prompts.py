@@ -20,7 +20,6 @@ LANGUAGE_CONFIRMATIONS = {
     "pcm": "Alright. Pidgin it is.\n\nWetin kind business you dey run?",
     "fr": "Parfait. On parle français.\n\nQuel type d'entreprise dirigez-vous?",
     "ar": "حسنا. سنتحدث العربية.\n\nما نوع عملك؟",
-    "ar": "\u062d\u0633\u0646\u0627. \u0633\u0646\u062a\u062d\u062f\u062b \u0628\u0627\u0644\u0639\u0631\u0628\u064a\u0629.\n\n\u0645\u0627 \u0646\u0648\u0639 \u0639\u0645\u0644\u0643\u061f",
 }
 
 LANGUAGE_SWITCH_MESSAGES = {
