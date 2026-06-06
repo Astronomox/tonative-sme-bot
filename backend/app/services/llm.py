@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-06 22:17:17
+# BizPadi build: 2026-06-06 22:59:25
 import asyncio
 import json
 import logging
@@ -120,7 +120,10 @@ async def _call_groq(
         try:
             start = time.monotonic()
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(GROQ_CHAT_URL, json=payload, headers=headers)
+                resp = await asyncio.wait_for(
+                    client.post(GROQ_CHAT_URL, json=payload, headers=headers),
+                    timeout=timeout + 5.0
+                )
                 resp.raise_for_status()
                 elapsed = int((time.monotonic() - start) * 1000)
                 data = resp.json()

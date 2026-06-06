@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-06 22:17:17
+# BizPadi build: 2026-06-06 22:59:25
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,9 +35,9 @@ async def get_pool():
             import asyncpg
             _pool = await asyncpg.create_pool(
                 settings.database_url,
-                min_size=1,
-                max_size=5,
-                command_timeout=10,
+                min_size=5,
+                max_size=20,
+                command_timeout=30,
             )
             logger.info("PostgreSQL pool created")
         except Exception as e:

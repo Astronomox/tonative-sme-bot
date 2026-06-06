@@ -53,3 +53,20 @@ CREATE POLICY "Service role full access on conversations"
     ON conversations FOR ALL
     USING (true)
     WITH CHECK (true);
+
+
+-- Performance indexes (added for production scale)
+CREATE INDEX IF NOT EXISTS idx_conversations_phone_created
+    ON conversations (phone_number, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_phone_role
+    ON conversations (phone_number, role, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_state
+    ON sme_profiles (state);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_language
+    ON sme_profiles (language);
+
+CREATE INDEX IF NOT EXISTS idx_applications_phone_status
+    ON application_tracking (phone_number, status);

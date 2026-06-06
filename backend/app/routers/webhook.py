@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-06 22:17:17
+# BizPadi build: 2026-06-06 22:59:25
 import asyncio
 import hashlib
 import logging
@@ -62,7 +62,7 @@ async def whatsapp_webhook(request: Request):
                 num_media=num_media,
                 media_content_type=media_type,
             ),
-            timeout=20.0,
+            timeout=45.0,
         )
     except asyncio.TimeoutError:
         logger.error(f"Timeout for {phone}")
