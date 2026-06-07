@@ -15,14 +15,27 @@ router = APIRouter()
 
 # Deduplication   prevents double replies when Twilio retries on slow responses
 _seen: dict[str, float] = {}
-_DEDUP_TTL = 30.0
+_DEDUP_TTL = 60.0
 
 
-def _is_duplicate(phone: str, body: str, media_url: str) -> bool:
-    key = hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
+def _is_duplicate(message_sid: str, phone: str, body: str, media_url: str) -> bool:
+    """
+    Use Twilio MessageSid as the primary dedup key.
+    This is a true unique ID per message — retries share the same SID.
+    Falls back to content hash when SID is unavailable.
+    """
+    if message_sid:
+        key = f"sid:{message_sid}"
+    else:
+        key = hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
+
     now = time.time()
-    _seen.update({k: v for k, v in _seen.items() if now - v < _DEDUP_TTL})
+    expired = [k for k, t in list(_seen.items()) if now - t > _DEDUP_TTL]
+    for k in expired:
+        del _seen[k]
+
     if key in _seen:
+        logger.info(f"Dedup hit: {key[:40]}")
         return True
     _seen[key] = now
     return False
@@ -49,8 +62,9 @@ async def whatsapp_webhook(request: Request):
 
     logger.info(f"IN | {phone} | body='{body[:60]}' | media={num_media}")
 
-    if _is_duplicate(phone, body or "", media_url or ""):
-        logger.info(f"Duplicate from {phone}, skipping")
+    message_sid = form.get("MessageSid", "")
+    if _is_duplicate(message_sid, phone, body or "", media_url or ""):
+        logger.info(f"Duplicate from {phone} (sid={message_sid}), skipping")
         return Response(content=_twiml(""), media_type="text/xml")
 
     try:
