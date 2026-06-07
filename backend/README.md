@@ -16,7 +16,7 @@ bizpadi/
 
 ## Landing Page
 
-Open `landing/index.html` in a browser — no build step needed.
+Open `landing/index.html` in a browser   no build step needed.
 
 To host it free: drag the `landing/` folder to Netlify Drop at app.netlify.com/drop.
 
