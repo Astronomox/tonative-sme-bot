@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-06 22:59:25
+# BizPadi build: 2026-06-07 smart-memory
 import asyncio
 import json
 import logging
@@ -34,7 +34,6 @@ LANGUAGE_NAMES = {
     "ar": "Arabic",
 }
 
-# Language switch phrases   detect these mid-conversation
 LANGUAGE_SWITCH_PATTERNS = {
     "en": ["speak english", "english please", "switch to english", "use english",
            "let's speak english", "change to english", "english"],
@@ -56,7 +55,6 @@ def get_groq_status() -> dict:
 
 
 def detect_language_switch(text: str) -> Optional[str]:
-    """Check if user is requesting a language switch. Returns new lang code or None."""
     lower = text.lower().strip()
     for lang_code, patterns in LANGUAGE_SWITCH_PATTERNS.items():
         if any(pattern in lower for pattern in patterns):
@@ -65,28 +63,17 @@ def detect_language_switch(text: str) -> Optional[str]:
 
 
 def _inject_language(system: str, language: str) -> str:
-    """Inject language instruction into system prompt."""
     if language == "en":
         return system
-
-    # For French and Pidgin: LLM handles these well natively
     if language in ("fr", "pcm"):
         lang_name = LANGUAGE_NAMES.get(language)
-        return system + (
-            f"\n\nIMPORTANT: Respond in {lang_name}. Be natural and fluent."
-        )
-
-    # For Yoruba, Hausa, Arabic: LLM is NOT fluent enough to generate well.
-    # Instead: think in English internally, then translate your response.
-    # This prevents repetitive hallucination garbage.
+        return system + f"\n\nIMPORTANT: Respond in {lang_name}. Be natural and fluent."
     lang_name = LANGUAGE_NAMES.get(language, "English")
     return system + (
         f"\n\nIMPORTANT: The user speaks {lang_name}. "
         f"Compose your response in clear simple English first, "
         f"then translate it accurately into {lang_name}. "
         f"Keep the translation SHORT and NATURAL. "
-        f"If you are not certain of a {lang_name} phrase, use simple English words "
-        f"that a {lang_name} speaker would understand rather than guessing. "
         f"DO NOT repeat phrases. DO NOT fill space with similar-sounding words. "
         f"If a sentence is done, stop."
     )
@@ -113,7 +100,6 @@ async def _call_groq(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-
     timeout = 45.0 if use_compound else 30.0
 
     for attempt in range(max_retries):
@@ -153,26 +139,86 @@ async def _call_groq(
     return None
 
 
+def _build_smart_messages(
+    system: str,
+    history: list[dict],
+    user_message: str,
+    language: str = "en",
+) -> list[dict]:
+    """
+    Build LLM messages with smart memory weighting.
+
+    Strategy:
+    - Always include system prompt
+    - Include a SUMMARY of older context (compressed)
+    - Always include the last 8 messages in full (recency matters most)
+    - Always include the current user message
+
+    This prevents old context from overriding new information.
+    """
+    injected_system = _inject_language(system, language)
+    messages = [{"role": "system", "content": injected_system}]
+
+    if len(history) <= 8:
+        messages.extend(history)
+    else:
+        # Older messages: summarise into a single system context note
+        older = history[:-8]
+        recent = history[-8:]
+
+        # Build a compact summary of older context
+        older_summary_parts = []
+        for msg in older:
+            role = "User" if msg["role"] == "user" else "BizPadi"
+            content = msg["content"][:200]  # truncate long messages
+            older_summary_parts.append(f"{role}: {content}")
+        older_summary = "\n".join(older_summary_parts)
+
+        messages.append({
+            "role": "system",
+            "content": (
+                f"EARLIER CONVERSATION SUMMARY (for context only, "
+                f"recent messages below are more accurate):\n{older_summary}"
+            )
+        })
+        messages.extend(recent)
+
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
 async def chat_with_sme(
     conversation_history: list[dict],
     user_message: str,
     language: str = "en",
 ) -> Optional[str]:
-    """Main conversation   responds in user's chosen language."""
-    system = _inject_language(SYSTEM_PROMPT, language)
-    messages = [{"role": "system", "content": system}]
-    messages.extend(conversation_history[-16:])  # last 16 messages for context
-    messages.append({"role": "user", "content": user_message})
+    """Main conversation with smart memory weighting."""
+    messages = _build_smart_messages(SYSTEM_PROMPT, conversation_history, user_message, language)
     return await _call_groq(messages, temperature=0.75, max_tokens=800)
 
 
 async def extract_profile_data(conversation_history: list[dict]) -> dict:
-    """Extract structured profile from conversation."""
+    """
+    Extract profile from conversation.
+    CRITICAL: Always prioritise the MOST RECENT information.
+    If user says bakery in message 2 but building materials in message 8,
+    building materials is the truth.
+    """
+    # Only use the last 12 messages for extraction to avoid stale data
+    recent_history = conversation_history[-12:]
+
     conversation_text = "\n".join(
         f"{'SME' if m['role'] == 'user' else 'BizPadi'}: {m['content']}"
-        for m in conversation_history[-20:]
+        for m in recent_history
     )
-    prompt = ONBOARDING_EXTRACTION_PROMPT.format(conversation=conversation_text)
+
+    # Enhanced prompt that explicitly handles contradictions
+    prompt = f"""{ONBOARDING_EXTRACTION_PROMPT.format(conversation=conversation_text)}
+
+CRITICAL RULE: If the user mentions different businesses or corrects themselves,
+always use the MOST RECENT information. The last thing they said about any field
+is the truth. Ignore earlier contradicted information."""
+
     result = await _call_groq(
         [{"role": "user", "content": prompt}],
         temperature=0.0,
@@ -188,11 +234,94 @@ async def extract_profile_data(conversation_history: list[dict]) -> dict:
         return {}
 
 
+async def extract_profile_update(user_message: str, current_profile_summary: str) -> dict:
+    """
+    Specifically extract profile changes from a single message.
+    Used when user sends new business information mid-conversation.
+    Returns only the fields that changed.
+    """
+    prompt = f"""A user is chatting with a business funding bot. They just sent this message:
+
+"{user_message}"
+
+Their current profile:
+{current_profile_summary}
+
+Extract ONLY the fields this message is changing or adding. If this message contains
+new business information that contradicts the current profile, extract the new values.
+
+Return ONLY valid JSON with changed fields. If nothing changed, return {{}}.
+
+Fields: business_name, business_type, location_city, location_state,
+business_stage (idea/early/growing/established),
+monthly_revenue (under_100k/100k_500k/500k_2m/2m_10m/above_10m),
+employee_count (integer), cac_registered (boolean), biggest_challenge, owner_name
+
+No explanation. No markdown. Just JSON."""
+
+    result = await _call_groq(
+        [{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=300,
+    )
+    if not result:
+        return {}
+    try:
+        cleaned = result.strip().strip("```json").strip("```").strip()
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {}
+
+
+def message_has_business_info(text: str) -> bool:
+    """
+    Detect if a message contains business profile information
+    that should trigger profile re-extraction.
+    """
+    lower = text.lower()
+
+    # Revenue mentions
+    revenue_patterns = [
+        "naira", "million", "thousand", "k monthly", "k per month",
+        "per month", "monthly", "revenue", "income", "i make", "we make",
+        "i earn", "we earn", "turnover", "i need", "we need",
+        "stock", "capital", "expand", "open another",
+    ]
+
+    # Business description patterns
+    business_patterns = [
+        "i sell", "i run", "i own", "we sell", "we run", "my business",
+        "my shop", "my store", "i have been", "years now", "years of",
+        "located at", "located in", "based in", "my office",
+        "i am a", "i work as", "i do", "we do", "building materials",
+        "fashion", "food", "agriculture", "technology", "bakery",
+        "clothing", "trading", "contractor", "supplier",
+    ]
+
+    # Location patterns
+    location_patterns = [
+        "lagos", "abuja", "kano", "ibadan", "port harcourt", "aba",
+        "enugu", "kaduna", "ogun", "oyo", "delta", "trade fair",
+        "island", "mainland", "market", "abuleoshun", "ikeja",
+        "surulere", "yaba", "lekki", "victoria island",
+    ]
+
+    has_revenue = any(p in lower for p in revenue_patterns)
+    has_business = any(p in lower for p in business_patterns)
+    has_location = any(p in lower for p in location_patterns)
+
+    # Single strong signal is enough if message is substantial
+    if has_business and len(text) > 20:
+        return True
+    if has_revenue and len(text) > 20:
+        return True
+    signals = sum([has_revenue, has_business, has_location])
+    return signals >= 2 and len(text) > 15
+
+
 async def detect_language_llm(text: str) -> str:
-    """Detect language via LLM. Returns ISO code."""
     if not text or len(text.strip()) < 3:
         return "en"
-
     prompt = (
         f'Detect the language of this text. Return ONLY one code:\n'
         f'en=English, fr=French, yo=Yoruba, ha=Hausa, pcm=Nigerian Pidgin, ar=Arabic\n\n'
@@ -211,13 +340,8 @@ async def detect_language_llm(text: str) -> str:
 
 
 async def get_live_opportunities(profile_summary: str, language: str = "en") -> Optional[str]:
-    """
-    Live web search for current Nigerian funding opportunities.
-    Uses Groq compound model to browse the web in real time.
-    """
     lang_name = LANGUAGE_NAMES.get(language, "English")
     system = LIVE_SEARCH_SYSTEM_PROMPT.format(language_name=lang_name)
-
     query = (
         f"Find current open funding opportunities, grants, and loans for Nigerian SMEs in 2025-2026. "
         f"Focus on opportunities that match this profile:\n{profile_summary}\n\n"
@@ -225,32 +349,19 @@ async def get_live_opportunities(profile_summary: str, language: str = "en") -> 
         f"youthop.com, disruptafrica.com for ACTIVE opportunities with open applications. "
         f"Include the application link and deadline for each one found."
     )
-
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": query},
     ]
-
     result = await _call_groq(messages, temperature=0.3, max_tokens=1200, use_compound=True)
-
-    # Fallback to standard model if compound fails
     if not result:
-        logger.info("Compound failed for live search, using standard model")
         result = await _call_groq(messages, temperature=0.3, max_tokens=1200, use_compound=False)
-
     return result
 
 
 async def get_fund_readiness_plan(profile_summary: str, language: str = "en") -> Optional[str]:
-    """
-    Consultant mode: tells user exactly what to do to qualify for more funding.
-    Gives specific week-by-week action plan.
-    """
     lang_name = LANGUAGE_NAMES.get(language, "English")
-    prompt = CONSULTANT_PROMPT.format(
-        language_name=lang_name,
-        profile=profile_summary,
-    )
+    prompt = CONSULTANT_PROMPT.format(language_name=lang_name, profile=profile_summary)
     return await _call_groq(
         [{"role": "user", "content": prompt}],
         temperature=0.6,
@@ -263,7 +374,6 @@ async def match_with_explanation(
     opportunities_text: str,
     language: str = "en",
 ) -> Optional[str]:
-    """Match opportunities with scores in brackets and specific explanations."""
     lang_name = LANGUAGE_NAMES.get(language, "English")
     prompt = MATCHING_PROMPT.format(
         language_name=lang_name,
