@@ -16,11 +16,11 @@ _memory_conversations: dict[str, list[dict]] = {}
 _memory_applications: dict[str, list[dict]] = {}  # phone -> list of tracking records
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-def _parse_dt(val) -> datetime:
+def _to_dt(val) -> datetime:
     """Convert str ISO timestamp or datetime to aware datetime for asyncpg."""
     if val is None:
         return datetime.now(timezone.utc)
@@ -156,6 +156,9 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
             if row:
                 data = dict(row)
                 data["applied_opportunities"] = list(data.get("applied_opportunities") or [])
+                for _f in ("created_at", "updated_at"):
+                    if _f in data and hasattr(data[_f], "isoformat"):
+                        data[_f] = data[_f].isoformat()
                 return SMEProfile(**data)
         except Exception as e:
             logger.warning(f"Postgres get_profile failed, trying memory: {e}")
@@ -165,9 +168,9 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
 
 
 async def upsert_profile(profile: SMEProfile) -> SMEProfile:
-    profile.updated_at = _now().isoformat()
+    profile.updated_at = _now()
     if not profile.created_at:
-        profile.created_at = _now().isoformat()
+        profile.created_at = _now()
 
     data = profile.model_dump()
     data["state"] = profile.state.value
@@ -208,7 +211,7 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
                     profile.employee_count, profile.cac_registered,
                     profile.biggest_challenge, profile.language,
                     profile.applied_opportunities,
-                    _parse_dt(profile.created_at), _parse_dt(profile.updated_at),
+                    _to_dt(profile.created_at), _to_dt(profile.updated_at),
                 )
         except Exception as e:
             logger.warning(f"Postgres upsert_profile failed, memory only: {e}")
@@ -233,7 +236,7 @@ async def update_profile_fields(phone_number: str, fields: dict) -> Optional[SME
 # ===================================================================
 
 async def save_message(phone_number: str, role: str, content: str):
-    msg = {"phone_number": phone_number, "role": role, "content": content, "created_at": _now().isoformat()}
+    msg = {"phone_number": phone_number, "role": role, "content": content, "created_at": _now()}
 
     pool = await get_pool()
     if pool:
@@ -305,14 +308,13 @@ async def track_application(
     notes: str = None,
 ) -> ApplicationTracking:
     now = _now()
-    now_str = now.isoformat()
     tracking = ApplicationTracking(
         phone_number=phone_number,
         opportunity_id=opportunity_id,
         opportunity_name=opportunity_name,
         status=status,
-        applied_at=now_str,
-        updated_at=now_str,
+        applied_at=now,
+        updated_at=now,
         notes=notes,
     )
 
@@ -324,7 +326,7 @@ async def track_application(
     existing = [a for a in _memory_applications[phone_number] if a["opportunity_id"] == opportunity_id]
     if existing:
         existing[0]["status"] = status
-        existing[0]["updated_at"] = now_str
+        existing[0]["updated_at"] = now
         if notes:
             existing[0]["notes"] = notes
     else:
@@ -345,7 +347,7 @@ async def track_application(
                         notes = COALESCE(EXCLUDED.notes, application_tracking.notes)
                 """,
                     phone_number, opportunity_id, opportunity_name,
-                    status, now, now, notes,
+                    status, _to_dt(now), _to_dt(now), notes,
                 )
         except Exception as e:
             logger.warning(f"Postgres track_application failed: {e}")
@@ -372,7 +374,14 @@ async def get_applications(phone_number: str) -> list[dict]:
                     phone_number,
                 )
             if rows:
-                return [dict(r) for r in rows]
+                result = []
+                for _r in rows:
+                    _d = dict(_r)
+                    for _f in ("applied_at", "updated_at", "created_at"):
+                        if _f in _d and hasattr(_d[_f], "isoformat"):
+                            _d[_f] = _d[_f].isoformat()
+                    result.append(_d)
+                return result
         except Exception as e:
             logger.warning(f"Postgres get_applications failed: {e}")
 
@@ -400,7 +409,14 @@ async def get_all_active_applications() -> list[dict]:
                        WHERE status IN ('applied', 'pending')
                        ORDER BY applied_at DESC"""
                 )
-            return [dict(r) for r in rows]
+            result = []
+            for _r in rows:
+                _d = dict(_r)
+                for _f in ("applied_at", "updated_at", "created_at"):
+                    if _f in _d and hasattr(_d[_f], "isoformat"):
+                        _d[_f] = _d[_f].isoformat()
+                result.append(_d)
+            return result
         except Exception as e:
             logger.warning(f"Postgres get_all_active_applications failed: {e}")
 
