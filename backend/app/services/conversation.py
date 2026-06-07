@@ -136,7 +136,9 @@ async def handle_incoming_message(
     # If user sends a message with clear business information at any state,
     # immediately extract and update the profile before processing the response.
     # This is the key fix for the "forgot mid-conversation" bug.
-    if (profile.state in (UserState.ONBOARDING, UserState.PROFILED, UserState.SUPPORT, UserState.CONFIRMING)
+    # Smart profile update: only during onboarding to avoid double Groq calls when profiled
+    if (profile.state == UserState.ONBOARDING
+            and len(user_text) > 30
             and message_has_business_info(user_text)):
         extracted = await extract_profile_update(user_text, profile.to_summary())
         if extracted:

@@ -21,7 +21,7 @@ _DEDUP_TTL = 60.0
 def _is_duplicate(message_sid: str, phone: str, body: str, media_url: str) -> bool:
     """
     Use Twilio MessageSid as the primary dedup key.
-    This is a true unique ID per message — retries share the same SID.
+    This is a true unique ID per message - retries share the same SID.
     Falls back to content hash when SID is unavailable.
     """
     if message_sid:

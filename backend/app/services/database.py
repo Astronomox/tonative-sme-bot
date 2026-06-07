@@ -16,8 +16,21 @@ _memory_conversations: dict[str, list[dict]] = {}
 _memory_applications: dict[str, list[dict]] = {}  # phone -> list of tracking records
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_dt(val) -> datetime:
+    """Convert str ISO timestamp or datetime to aware datetime for asyncpg."""
+    if val is None:
+        return datetime.now(timezone.utc)
+    if isinstance(val, datetime):
+        return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(val))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +165,9 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
 
 
 async def upsert_profile(profile: SMEProfile) -> SMEProfile:
-    profile.updated_at = _now()
+    profile.updated_at = _now().isoformat()
     if not profile.created_at:
-        profile.created_at = _now()
+        profile.created_at = _now().isoformat()
 
     data = profile.model_dump()
     data["state"] = profile.state.value
@@ -195,7 +208,7 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
                     profile.employee_count, profile.cac_registered,
                     profile.biggest_challenge, profile.language,
                     profile.applied_opportunities,
-                    profile.created_at, profile.updated_at,
+                    _parse_dt(profile.created_at), _parse_dt(profile.updated_at),
                 )
         except Exception as e:
             logger.warning(f"Postgres upsert_profile failed, memory only: {e}")
@@ -220,7 +233,7 @@ async def update_profile_fields(phone_number: str, fields: dict) -> Optional[SME
 # ===================================================================
 
 async def save_message(phone_number: str, role: str, content: str):
-    msg = {"phone_number": phone_number, "role": role, "content": content, "created_at": _now()}
+    msg = {"phone_number": phone_number, "role": role, "content": content, "created_at": _now().isoformat()}
 
     pool = await get_pool()
     if pool:
@@ -292,13 +305,14 @@ async def track_application(
     notes: str = None,
 ) -> ApplicationTracking:
     now = _now()
+    now_str = now.isoformat()
     tracking = ApplicationTracking(
         phone_number=phone_number,
         opportunity_id=opportunity_id,
         opportunity_name=opportunity_name,
         status=status,
-        applied_at=now,
-        updated_at=now,
+        applied_at=now_str,
+        updated_at=now_str,
         notes=notes,
     )
 
@@ -310,7 +324,7 @@ async def track_application(
     existing = [a for a in _memory_applications[phone_number] if a["opportunity_id"] == opportunity_id]
     if existing:
         existing[0]["status"] = status
-        existing[0]["updated_at"] = now
+        existing[0]["updated_at"] = now_str
         if notes:
             existing[0]["notes"] = notes
     else:
