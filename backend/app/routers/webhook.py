@@ -1,20 +1,12 @@
-# BizPadi build: 2026-06-08 async-webhook
+# BizPadi build: 2026-06-08 final
 """
-Webhook: WhatsApp inbound messages from Twilio.
+Webhook: WhatsApp inbound from Twilio.
 
-ARCHITECTURE: Fire-and-forget async processing.
-
-Twilio WhatsApp requires an HTTP response within 15 seconds.
-Processing (voice download + transcription + LLM) takes 5-25 seconds.
-Without this pattern, slow messages silently fail - Twilio drops the connection
-before we respond, and the user sees nothing.
-
-Solution:
-  1. Parse form data
-  2. Deduplicate (block Twilio retries from double-processing)
-  3. ACK Twilio immediately with empty 200 OK (< 100ms)
-  4. Process message in asyncio background task (no time limit)
-  5. Send reply via Twilio REST API when ready
+Architecture: Fire-and-forget async processing.
+Twilio WhatsApp requires HTTP response within 15 seconds.
+Processing (voice + LLM) takes 5-25 seconds.
+Solution: ACK Twilio immediately (<100ms), process in background,
+reply via Twilio REST API when done.
 """
 import asyncio
 import hashlib
@@ -29,22 +21,15 @@ from app.services.whatsapp import send_whatsapp_message, split_message
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Dedup: Twilio retries the same MessageSid if it doesn't get a response fast enough.
-# We store seen SIDs so the retry is ACKed immediately without re-processing.
 _seen: dict[str, float] = {}
-_DEDUP_TTL = 120.0  # 2 minutes covers Twilio's full retry window
+_DEDUP_TTL = 120.0
 
 
-def _is_duplicate(message_sid: str, phone: str, body: str, media_url: str) -> bool:
-    """Return True if this message was already accepted for processing."""
-    key = f"sid:{message_sid}" if message_sid else hashlib.md5(
-        f"{phone}:{body}:{media_url}".encode()
-    ).hexdigest()
-
+def _is_duplicate(sid: str, phone: str, body: str, media_url: str) -> bool:
+    key = f"sid:{sid}" if sid else hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
     now = time.time()
     for k in [k for k, t in list(_seen.items()) if now - t > _DEDUP_TTL]:
         del _seen[k]
-
     if key in _seen:
         logger.info(f"Dedup: {key[:40]}")
         return True
@@ -53,21 +38,13 @@ def _is_duplicate(message_sid: str, phone: str, body: str, media_url: str) -> bo
 
 
 def _ack() -> Response:
-    """Empty TwiML response - tells Twilio we received the message."""
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         media_type="text/xml",
     )
 
 
-async def _process_and_reply(
-    phone: str, body: str, media_url, num_media: int, media_type: str
-) -> None:
-    """
-    Background task: process the message and send the reply.
-    Runs after the webhook already returned 200 OK to Twilio.
-    No 15-second constraint here.
-    """
+async def _process_and_reply(phone: str, body: str, media_url, num_media: int, media_type: str):
     try:
         result = await handle_incoming_message(
             phone_number=phone,
@@ -79,15 +56,13 @@ async def _process_and_reply(
         text = result.get("text_response", "")
         if not text:
             return
-
         chunks = split_message(text)
         for i, chunk in enumerate(chunks):
             if i > 0:
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.5)
             await send_whatsapp_message(phone, chunk)
-
     except Exception as e:
-        logger.error(f"Background processing error for {phone}: {e}", exc_info=True)
+        logger.error(f"Background error for {phone}: {e}", exc_info=True)
         try:
             await send_whatsapp_message(phone, "Something went wrong. Please try again.")
         except Exception:
@@ -109,13 +84,10 @@ async def whatsapp_webhook(request: Request):
     media_type = form.get("MediaContentType0", "audio/ogg")
     sid        = form.get("MessageSid", "")
 
-    logger.info(f"IN | {phone} | body='{(body or '')[:60]}' | media={num_media}")
+    logger.info(f"IN | {phone} | body='{(body or '')[:60]}' | media={num_media} | sid={sid[:16]}")
 
     if _is_duplicate(sid, phone, body or "", media_url or ""):
         return _ack()
 
-    # ACK Twilio immediately, do the work in the background
-    asyncio.create_task(
-        _process_and_reply(phone, body, media_url, num_media, media_type)
-    )
+    asyncio.create_task(_process_and_reply(phone, body, media_url, num_media, media_type))
     return _ack()

@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-08 full-fix
+# BizPadi build: 2026-06-08 final
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,9 +8,6 @@ from app.models.schemas import SMEProfile, UserState, ApplicationTracking
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# In-memory fallback (survives within a single process lifetime only)
-# ---------------------------------------------------------------------------
 _memory_profiles: dict[str, dict] = {}
 _memory_conversations: dict[str, list[dict]] = {}
 _memory_applications: dict[str, list[dict]] = {}
@@ -35,19 +32,17 @@ def _to_dt(val) -> datetime:
 
 def _sanitize_row(data: dict) -> dict:
     """
-    Normalise a raw data dict (from asyncpg row or memory) before passing
-    to SMEProfile(**data). Prevents Pydantic ValidationErrors from:
-      - asyncpg returning datetime objects for TIMESTAMPTZ columns
-      - LLM returning employee_count as "" instead of None/int
-      - applied_opportunities being None instead of []
+    Normalise raw data (asyncpg row or memory dict) before SMEProfile(**data).
+    Prevents Pydantic ValidationErrors from:
+      - asyncpg returning datetime for TIMESTAMPTZ (needs str)
+      - LLM returning employee_count="" (needs int or None)
+      - applied_opportunities being None (needs list)
     """
-    # TIMESTAMPTZ -> isoformat string (SMEProfile stores timestamps as str)
     for field in ("created_at", "updated_at"):
         v = data.get(field)
         if v is not None and hasattr(v, "isoformat"):
             data[field] = v.isoformat()
 
-    # employee_count must be int or None - LLM sometimes returns ""
     ec = data.get("employee_count")
     if ec is not None and not isinstance(ec, int):
         s = str(ec).strip()
@@ -56,7 +51,6 @@ def _sanitize_row(data: dict) -> dict:
         except (ValueError, TypeError):
             data["employee_count"] = None
 
-    # applied_opportunities must always be a list of strings
     ao = data.get("applied_opportunities")
     data["applied_opportunities"] = [str(x) for x in (ao or []) if x is not None]
 
@@ -81,6 +75,10 @@ async def get_pool():
                 min_size=2,
                 max_size=10,
                 command_timeout=30,
+                # CRITICAL: Render uses pgbouncer in transaction mode.
+                # pgbouncer transaction mode does not support prepared statements.
+                # statement_cache_size=0 disables them, using simple queries instead.
+                statement_cache_size=0,
             )
             logger.info("PostgreSQL pool created")
         except Exception as e:
@@ -165,7 +163,7 @@ async def _ensure_schema():
                 ON application_tracking (opportunity_id, status);
         """)
 
-        # Migrations: add columns that may be missing on older tables
+        # Migration: add owner_name column if missing on existing tables
         await conn.execute(
             "ALTER TABLE sme_profiles ADD COLUMN IF NOT EXISTS owner_name TEXT"
         )
@@ -209,7 +207,7 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
     if not profile.created_at:
         profile.created_at = _now()
 
-    # Coerce employee_count: must be int or None before any write
+    # Coerce employee_count: must be int or None
     if isinstance(profile.employee_count, str):
         s = profile.employee_count.strip()
         try:
@@ -303,13 +301,12 @@ async def save_message(phone_number: str, role: str, content: str):
 
 
 async def get_conversation_history(phone_number: str, limit: int = 20) -> list[dict]:
-    """Return the most recent `limit` messages for this user, in chronological order."""
+    """Return the most recent `limit` messages in chronological order."""
     pool = await get_pool()
     if pool:
         try:
             await _ensure_schema()
             async with pool.acquire() as conn:
-                # Fetch most-recent first, then reverse so LLM gets chronological order
                 rows = await conn.fetch(
                     """SELECT role, content, created_at FROM conversations
                        WHERE phone_number = $1
@@ -330,12 +327,10 @@ async def format_history_for_llm(
     max_messages: int = 10,
     max_chars: int = 4000,
 ) -> list[dict]:
-    """Return recent conversation history formatted for LLM messages list."""
     history = await get_conversation_history(phone_number, limit=max_messages)
     formatted = []
     total_chars = 0
 
-    # Walk newest-to-oldest to fill char budget, then reverse for chronological order
     for msg in reversed(history):
         content = msg["content"]
         if total_chars + len(content) > max_chars:
@@ -435,12 +430,7 @@ async def get_applications(phone_number: str) -> list[dict]:
     return _memory_applications.get(phone_number, [])
 
 
-async def update_application_status(
-    phone_number: str,
-    opportunity_id: str,
-    status: str,
-    notes: str = None,
-):
+async def update_application_status(phone_number: str, opportunity_id: str, status: str, notes: str = None):
     return await track_application(phone_number, opportunity_id, "", status, notes)
 
 

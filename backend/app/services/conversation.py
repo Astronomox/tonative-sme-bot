@@ -132,9 +132,8 @@ async def handle_incoming_message(
 
     await save_message(phone_number, "user", user_text)
 
-    # Smart profile update: only during onboarding, only on substantive messages.
-    # If this runs, we flag it so _handle_onboarding skips the redundant
-    # extract_profile_data call (avoids 3 Groq calls -> 2 Groq calls per message).
+    # Smart profile update: only during onboarding on substantive messages.
+    # Flag prevents redundant extract_profile_data call in _handle_onboarding.
     _smart_updated = False
     if (profile.state == UserState.ONBOARDING
             and len(user_text) > 30
@@ -287,9 +286,8 @@ async def _handle_onboarding(profile: SMEProfile, user_text: str, smart_updated:
     if not response:
         return "Having a small issue. Try again in a moment."
 
-    # If smart_updated already ran extract_profile_update this turn, skip the
-    # redundant extract_profile_data call to avoid burning Groq rate limit budget.
     if not smart_updated:
+        # No smart update ran this turn - run full extraction
         full_history = history + [
             {"role": "user", "content": user_text},
             {"role": "assistant", "content": response},
@@ -302,12 +300,11 @@ async def _handle_onboarding(profile: SMEProfile, user_text: str, smart_updated:
                 await upsert_profile(updated)
                 return updated.to_confirmation_message()
     else:
-        # smart_update already ran - just check if profile is now complete
-        fresh = await upsert_profile(profile)  # re-read via upsert to get latest
-        if fresh and fresh.is_profile_complete():
-            fresh.state = UserState.CONFIRMING
-            await upsert_profile(fresh)
-            return fresh.to_confirmation_message()
+        # Smart update already ran - just check if profile is now complete
+        if profile.is_profile_complete():
+            profile.state = UserState.CONFIRMING
+            await upsert_profile(profile)
+            return profile.to_confirmation_message()
 
     return response
 

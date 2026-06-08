@@ -96,32 +96,40 @@ def build_twiml_media(message: str, media_url: str) -> str:
 
 
 async def send_whatsapp_message(to: str, body: str, media_url: Optional[str] = None):
-    """Send a WhatsApp message via Twilio REST API (for proactive/overflow messages)."""
+    """Send a WhatsApp message via Twilio REST API with retry for sandbox rate limits."""
     if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
         logger.warning("Twilio credentials not set, skipping send")
         return None
 
+    import asyncio
     url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
-
-    data = {
-        "From": settings.TWILIO_WHATSAPP_NUMBER,
-        "To": to,
-        "Body": body,
-    }
-
+    data = {"From": settings.TWILIO_WHATSAPP_NUMBER, "To": to, "Body": body}
     if media_url:
         data["MediaUrl"] = media_url
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                url,
-                data=data,
-                auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
-            )
-            response.raise_for_status()
-            logger.info(f"Message sent to {to}")
-            return response.json()
-    except Exception as e:
-        logger.error(f"Failed to send WhatsApp message: {e}")
-        return None
+    for attempt in range(4):  # up to 3 retries
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    url,
+                    data=data,
+                    auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+                )
+                if response.status_code == 429:
+                    # Twilio sandbox rate limit - wait and retry
+                    wait = (attempt + 1) * 2.0  # 2s, 4s, 6s
+                    logger.warning(f"Twilio 429 for {to}, retrying in {wait}s (attempt {attempt+1})")
+                    await asyncio.sleep(wait)
+                    continue
+                response.raise_for_status()
+                logger.info(f"Message sent to {to}")
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Twilio HTTP {e.response.status_code} for {to}: {e.response.text[:200]}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to send WhatsApp message to {to}: {e}")
+            return None
+
+    logger.error(f"Twilio send failed after retries for {to}")
+    return None
