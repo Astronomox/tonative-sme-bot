@@ -1,15 +1,20 @@
-# BizPadi build: 2026-06-08 async-webhook-fix
+# BizPadi build: 2026-06-08 async-webhook
 """
-Webhook router.
+Webhook: WhatsApp inbound messages from Twilio.
 
-KEY ARCHITECTURE: Async background processing.
+ARCHITECTURE: Fire-and-forget async processing.
 
-Twilio WhatsApp has a 15-second response window.
-Voice notes + LLM calls take 10-30 seconds.
-Solution: ACK immediately with empty 200 OK, process in background,
-send reply via Twilio REST API (send_whatsapp_message).
+Twilio WhatsApp requires an HTTP response within 15 seconds.
+Processing (voice download + transcription + LLM) takes 5-25 seconds.
+Without this pattern, slow messages silently fail - Twilio drops the connection
+before we respond, and the user sees nothing.
 
-This eliminates ALL timeout-related silent failures.
+Solution:
+  1. Parse form data
+  2. Deduplicate (block Twilio retries from double-processing)
+  3. ACK Twilio immediately with empty 200 OK (< 100ms)
+  4. Process message in asyncio background task (no time limit)
+  5. Send reply via Twilio REST API when ready
 """
 import asyncio
 import hashlib
@@ -20,47 +25,48 @@ from fastapi import APIRouter, Request, Response
 
 from app.services.conversation import handle_incoming_message
 from app.services.whatsapp import send_whatsapp_message, split_message
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Dedup: prevents double processing when Twilio retries (same MessageSid)
+# Dedup: Twilio retries the same MessageSid if it doesn't get a response fast enough.
+# We store seen SIDs so the retry is ACKed immediately without re-processing.
 _seen: dict[str, float] = {}
-_DEDUP_TTL = 120.0  # 2 minutes - covers Twilio's full retry window
+_DEDUP_TTL = 120.0  # 2 minutes covers Twilio's full retry window
 
 
 def _is_duplicate(message_sid: str, phone: str, body: str, media_url: str) -> bool:
-    if message_sid:
-        key = f"sid:{message_sid}"
-    else:
-        key = hashlib.md5(f"{phone}:{body}:{media_url}".encode()).hexdigest()
+    """Return True if this message was already accepted for processing."""
+    key = f"sid:{message_sid}" if message_sid else hashlib.md5(
+        f"{phone}:{body}:{media_url}".encode()
+    ).hexdigest()
 
     now = time.time()
-    # Clean expired entries
     for k in [k for k, t in list(_seen.items()) if now - t > _DEDUP_TTL]:
         del _seen[k]
 
     if key in _seen:
-        logger.info(f"Duplicate {key[:40]}, skipping")
+        logger.info(f"Dedup: {key[:40]}")
         return True
     _seen[key] = now
     return False
 
 
 def _ack() -> Response:
-    """Empty 200 OK TwiML - tells Twilio we got the message."""
+    """Empty TwiML response - tells Twilio we received the message."""
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         media_type="text/xml",
     )
 
 
-async def _process_and_reply(phone: str, body: str, media_url, num_media: int, media_type: str):
+async def _process_and_reply(
+    phone: str, body: str, media_url, num_media: int, media_type: str
+) -> None:
     """
-    Background task: process message and send reply via REST API.
-    Runs AFTER webhook already returned 200 OK to Twilio.
-    No timeout pressure - Twilio is already satisfied.
+    Background task: process the message and send the reply.
+    Runs after the webhook already returned 200 OK to Twilio.
+    No 15-second constraint here.
     """
     try:
         result = await handle_incoming_message(
@@ -74,11 +80,10 @@ async def _process_and_reply(phone: str, body: str, media_url, num_media: int, m
         if not text:
             return
 
-        # Split long messages and send each chunk
         chunks = split_message(text)
         for i, chunk in enumerate(chunks):
             if i > 0:
-                await asyncio.sleep(0.5)  # Small delay between chunks
+                await asyncio.sleep(0.4)
             await send_whatsapp_message(phone, chunk)
 
     except Exception as e:
@@ -97,23 +102,20 @@ async def whatsapp_webhook(request: Request):
         logger.error(f"Form parse error: {e}")
         return _ack()
 
-    phone = form.get("From", "")
-    body = form.get("Body", "")
-    num_media = int(form.get("NumMedia", "0") or "0")
-    media_url = form.get("MediaUrl0")
+    phone      = form.get("From", "")
+    body       = form.get("Body", "")
+    num_media  = int(form.get("NumMedia", "0") or "0")
+    media_url  = form.get("MediaUrl0")
     media_type = form.get("MediaContentType0", "audio/ogg")
-    message_sid = form.get("MessageSid", "")
+    sid        = form.get("MessageSid", "")
 
-    logger.info(f"IN | {phone} | body='{(body or '')[:60]}' | media={num_media} | sid={message_sid[:16]}")
+    logger.info(f"IN | {phone} | body='{(body or '')[:60]}' | media={num_media}")
 
-    # Dedup check - block retries from being re-processed
-    if _is_duplicate(message_sid, phone, body or "", media_url or ""):
+    if _is_duplicate(sid, phone, body or "", media_url or ""):
         return _ack()
 
-    # ACK Twilio immediately - no timeout risk
-    # Fire background task to do the actual work
+    # ACK Twilio immediately, do the work in the background
     asyncio.create_task(
         _process_and_reply(phone, body, media_url, num_media, media_type)
     )
-
     return _ack()

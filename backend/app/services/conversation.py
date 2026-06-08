@@ -132,11 +132,10 @@ async def handle_incoming_message(
 
     await save_message(phone_number, "user", user_text)
 
-    # Smart profile update detection:
-    # If user sends a message with clear business information at any state,
-    # immediately extract and update the profile before processing the response.
-    # This is the key fix for the "forgot mid-conversation" bug.
-    # Smart update: only during onboarding to avoid extra Groq calls when already profiled
+    # Smart profile update: only during onboarding, only on substantive messages.
+    # If this runs, we flag it so _handle_onboarding skips the redundant
+    # extract_profile_data call (avoids 3 Groq calls -> 2 Groq calls per message).
+    _smart_updated = False
     if (profile.state == UserState.ONBOARDING
             and len(user_text) > 30
             and message_has_business_info(user_text)):
@@ -145,14 +144,15 @@ async def handle_incoming_message(
             updated = await update_profile_fields(phone_number, extracted)
             if updated:
                 profile = updated
+                _smart_updated = True
                 logger.info(f"Smart profile update: {extracted}")
 
-    response = await _process(profile, user_text)
+    response = await _process(profile, user_text, smart_updated=_smart_updated)
     await save_message(phone_number, "assistant", response)
     return {"text_response": response, "audio_path": None}
 
 
-async def _process(profile: SMEProfile, user_text: str) -> str:
+async def _process(profile: SMEProfile, user_text: str, smart_updated: bool = False) -> str:
     lower = user_text.lower().strip()
     lang = profile.language
 
@@ -203,13 +203,13 @@ async def _process(profile: SMEProfile, user_text: str) -> str:
         return await _handle_live_search(profile, user_text)
 
     if profile.state == UserState.ONBOARDING:
-        return await _handle_onboarding(profile, user_text)
+        return await _handle_onboarding(profile, user_text, smart_updated=smart_updated)
     elif profile.state == UserState.CONFIRMING:
         return await _handle_confirmation(profile, user_text)
     elif profile.state in (UserState.PROFILED, UserState.SUPPORT):
         return await _handle_profiled(profile, user_text)
     else:
-        return await _handle_onboarding(profile, user_text)
+        return await _handle_onboarding(profile, user_text, smart_updated=smart_updated)
 
 
 async def _handle_language_selection(profile: SMEProfile, user_text: str) -> str:
@@ -281,23 +281,33 @@ def _help_menu(lang: str) -> str:
     return menus.get(lang, menus["en"])
 
 
-async def _handle_onboarding(profile: SMEProfile, user_text: str) -> str:
+async def _handle_onboarding(profile: SMEProfile, user_text: str, smart_updated: bool = False) -> str:
     history = await format_history_for_llm(profile.phone_number)
     response = await chat_with_sme(history, user_text, profile.language)
     if not response:
         return "Having a small issue. Try again in a moment."
 
-    full_history = history + [
-        {"role": "user", "content": user_text},
-        {"role": "assistant", "content": response},
-    ]
-    extracted = await extract_profile_data(full_history)
-    if extracted:
-        updated = await update_profile_fields(profile.phone_number, extracted)
-        if updated and updated.is_profile_complete():
-            updated.state = UserState.CONFIRMING
-            await upsert_profile(updated)
-            return updated.to_confirmation_message()
+    # If smart_updated already ran extract_profile_update this turn, skip the
+    # redundant extract_profile_data call to avoid burning Groq rate limit budget.
+    if not smart_updated:
+        full_history = history + [
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": response},
+        ]
+        extracted = await extract_profile_data(full_history)
+        if extracted:
+            updated = await update_profile_fields(profile.phone_number, extracted)
+            if updated and updated.is_profile_complete():
+                updated.state = UserState.CONFIRMING
+                await upsert_profile(updated)
+                return updated.to_confirmation_message()
+    else:
+        # smart_update already ran - just check if profile is now complete
+        fresh = await upsert_profile(profile)  # re-read via upsert to get latest
+        if fresh and fresh.is_profile_complete():
+            fresh.state = UserState.CONFIRMING
+            await upsert_profile(fresh)
+            return fresh.to_confirmation_message()
 
     return response
 

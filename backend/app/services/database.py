@@ -1,4 +1,4 @@
-# BizPadi build: 2026-06-06 22:59:25
+# BizPadi build: 2026-06-08 full-fix
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -9,11 +9,11 @@ from app.models.schemas import SMEProfile, UserState, ApplicationTracking
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory fallback
+# In-memory fallback (survives within a single process lifetime only)
 # ---------------------------------------------------------------------------
 _memory_profiles: dict[str, dict] = {}
 _memory_conversations: dict[str, list[dict]] = {}
-_memory_applications: dict[str, list[dict]] = {}  # phone -> list of tracking records
+_memory_applications: dict[str, list[dict]] = {}
 
 
 def _now() -> str:
@@ -21,7 +21,7 @@ def _now() -> str:
 
 
 def _to_dt(val) -> datetime:
-    """Convert str ISO timestamp or datetime to aware datetime for asyncpg."""
+    """Convert ISO string or datetime to timezone-aware datetime for asyncpg TIMESTAMPTZ."""
     if val is None:
         return datetime.now(timezone.utc)
     if isinstance(val, datetime):
@@ -33,8 +33,38 @@ def _to_dt(val) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _sanitize_row(data: dict) -> dict:
+    """
+    Normalise a raw data dict (from asyncpg row or memory) before passing
+    to SMEProfile(**data). Prevents Pydantic ValidationErrors from:
+      - asyncpg returning datetime objects for TIMESTAMPTZ columns
+      - LLM returning employee_count as "" instead of None/int
+      - applied_opportunities being None instead of []
+    """
+    # TIMESTAMPTZ -> isoformat string (SMEProfile stores timestamps as str)
+    for field in ("created_at", "updated_at"):
+        v = data.get(field)
+        if v is not None and hasattr(v, "isoformat"):
+            data[field] = v.isoformat()
+
+    # employee_count must be int or None - LLM sometimes returns ""
+    ec = data.get("employee_count")
+    if ec is not None and not isinstance(ec, int):
+        s = str(ec).strip()
+        try:
+            data["employee_count"] = int(s) if s else None
+        except (ValueError, TypeError):
+            data["employee_count"] = None
+
+    # applied_opportunities must always be a list of strings
+    ao = data.get("applied_opportunities")
+    data["applied_opportunities"] = [str(x) for x in (ao or []) if x is not None]
+
+    return data
+
+
 # ---------------------------------------------------------------------------
-# Connection pool (asyncpg)
+# Connection pool
 # ---------------------------------------------------------------------------
 _pool = None
 
@@ -48,8 +78,8 @@ async def get_pool():
             import asyncpg
             _pool = await asyncpg.create_pool(
                 settings.database_url,
-                min_size=5,
-                max_size=20,
+                min_size=2,
+                max_size=10,
                 command_timeout=30,
             )
             logger.info("PostgreSQL pool created")
@@ -74,7 +104,7 @@ def get_db_status() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Schema (auto-created on first connect)
+# Schema bootstrap
 # ---------------------------------------------------------------------------
 _schema_applied = False
 
@@ -89,57 +119,57 @@ async def _ensure_schema():
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS sme_profiles (
-                phone_number TEXT PRIMARY KEY,
-                state TEXT NOT NULL DEFAULT 'onboarding',
-                owner_name TEXT,
-                business_name TEXT,
-                business_type TEXT,
-                location_city TEXT,
-                location_state TEXT,
-                business_stage TEXT,
-                monthly_revenue TEXT,
-                employee_count INTEGER,
-                cac_registered BOOLEAN,
-                biggest_challenge TEXT,
-                language TEXT DEFAULT 'en',
+                phone_number         TEXT PRIMARY KEY,
+                state                TEXT NOT NULL DEFAULT 'language_select',
+                owner_name           TEXT,
+                business_name        TEXT,
+                business_type        TEXT,
+                location_city        TEXT,
+                location_state       TEXT,
+                business_stage       TEXT,
+                monthly_revenue      TEXT,
+                employee_count       INTEGER,
+                cac_registered       BOOLEAN,
+                biggest_challenge    TEXT,
+                language             TEXT DEFAULT 'en',
                 applied_opportunities TEXT[] DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
+                created_at           TIMESTAMPTZ DEFAULT NOW(),
+                updated_at           TIMESTAMPTZ DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS conversations (
-                id BIGSERIAL PRIMARY KEY,
+                id           BIGSERIAL PRIMARY KEY,
                 phone_number TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW()
+                role         TEXT NOT NULL,
+                content      TEXT NOT NULL,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS application_tracking (
-                id BIGSERIAL PRIMARY KEY,
-                phone_number TEXT NOT NULL,
-                opportunity_id TEXT NOT NULL,
+                id               BIGSERIAL PRIMARY KEY,
+                phone_number     TEXT NOT NULL,
+                opportunity_id   TEXT NOT NULL,
                 opportunity_name TEXT NOT NULL,
-                status TEXT DEFAULT 'applied',
-                applied_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                notes TEXT,
+                status           TEXT DEFAULT 'applied',
+                applied_at       TIMESTAMPTZ DEFAULT NOW(),
+                updated_at       TIMESTAMPTZ DEFAULT NOW(),
+                notes            TEXT,
                 UNIQUE(phone_number, opportunity_id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_conversations_phone
                 ON conversations (phone_number, created_at);
-
             CREATE INDEX IF NOT EXISTS idx_applications_phone
                 ON application_tracking (phone_number);
-
             CREATE INDEX IF NOT EXISTS idx_applications_deadline
                 ON application_tracking (opportunity_id, status);
         """)
-        # Migration: add owner_name if it doesn't exist on old tables
+
+        # Migrations: add columns that may be missing on older tables
         await conn.execute(
             "ALTER TABLE sme_profiles ADD COLUMN IF NOT EXISTS owner_name TEXT"
         )
+
     _schema_applied = True
     logger.info("Database schema ready")
 
@@ -147,29 +177,6 @@ async def _ensure_schema():
 # ===================================================================
 # PROFILE OPERATIONS
 # ===================================================================
-
-def _sanitize_profile_data(data: dict) -> dict:
-    """Clean raw data (from DB row or memory dict) before passing to SMEProfile."""
-    # datetime -> isoformat string (asyncpg returns datetime for TIMESTAMPTZ)
-    for _f in ("created_at", "updated_at"):
-        if _f in data and hasattr(data[_f], "isoformat"):
-            data[_f] = data[_f].isoformat()
-
-    # employee_count must be int or None - LLM sometimes returns ""
-    ec = data.get("employee_count")
-    if ec is not None and not isinstance(ec, int):
-        stripped = str(ec).strip()
-        try:
-            data["employee_count"] = int(stripped) if stripped else None
-        except (ValueError, TypeError):
-            data["employee_count"] = None
-
-    # applied_opportunities must be list[str]
-    data["applied_opportunities"] = [
-        str(x) for x in (data.get("applied_opportunities") or []) if x is not None
-    ]
-    return data
-
 
 async def get_profile(phone_number: str) -> Optional[SMEProfile]:
     pool = await get_pool()
@@ -182,7 +189,7 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
                     phone_number,
                 )
             if row:
-                data = _sanitize_profile_data(dict(row))
+                data = _sanitize_row(dict(row))
                 return SMEProfile(**data)
         except Exception as e:
             logger.warning(f"Postgres get_profile failed, trying memory: {e}")
@@ -190,9 +197,9 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
     raw = _memory_profiles.get(phone_number)
     if raw:
         try:
-            return SMEProfile(**_sanitize_profile_data(dict(raw)))
+            return SMEProfile(**_sanitize_row(dict(raw)))
         except Exception as e:
-            logger.warning(f"Memory profile corrupt, clearing: {e}")
+            logger.warning(f"Memory profile corrupt for {phone_number}, clearing: {e}")
             _memory_profiles.pop(phone_number, None)
     return None
 
@@ -202,11 +209,11 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
     if not profile.created_at:
         profile.created_at = _now()
 
-    # Coerce employee_count: must be int or None before DB write
+    # Coerce employee_count: must be int or None before any write
     if isinstance(profile.employee_count, str):
-        stripped = profile.employee_count.strip()
+        s = profile.employee_count.strip()
         try:
-            profile.employee_count = int(stripped) if stripped else None
+            profile.employee_count = int(s) if s else None
         except (ValueError, TypeError):
             profile.employee_count = None
 
@@ -228,20 +235,20 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
                         created_at, updated_at
                     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                     ON CONFLICT (phone_number) DO UPDATE SET
-                        state = EXCLUDED.state,
-                        owner_name = EXCLUDED.owner_name,
-                        business_name = EXCLUDED.business_name,
-                        business_type = EXCLUDED.business_type,
-                        location_city = EXCLUDED.location_city,
-                        location_state = EXCLUDED.location_state,
-                        business_stage = EXCLUDED.business_stage,
-                        monthly_revenue = EXCLUDED.monthly_revenue,
-                        employee_count = EXCLUDED.employee_count,
-                        cac_registered = EXCLUDED.cac_registered,
-                        biggest_challenge = EXCLUDED.biggest_challenge,
-                        language = EXCLUDED.language,
+                        state                 = EXCLUDED.state,
+                        owner_name            = EXCLUDED.owner_name,
+                        business_name         = EXCLUDED.business_name,
+                        business_type         = EXCLUDED.business_type,
+                        location_city         = EXCLUDED.location_city,
+                        location_state        = EXCLUDED.location_state,
+                        business_stage        = EXCLUDED.business_stage,
+                        monthly_revenue       = EXCLUDED.monthly_revenue,
+                        employee_count        = EXCLUDED.employee_count,
+                        cac_registered        = EXCLUDED.cac_registered,
+                        biggest_challenge     = EXCLUDED.biggest_challenge,
+                        language              = EXCLUDED.language,
                         applied_opportunities = EXCLUDED.applied_opportunities,
-                        updated_at = EXCLUDED.updated_at
+                        updated_at            = EXCLUDED.updated_at
                 """,
                     profile.phone_number, profile.state.value,
                     profile.owner_name, profile.business_name, profile.business_type,
@@ -296,19 +303,21 @@ async def save_message(phone_number: str, role: str, content: str):
 
 
 async def get_conversation_history(phone_number: str, limit: int = 20) -> list[dict]:
+    """Return the most recent `limit` messages for this user, in chronological order."""
     pool = await get_pool()
     if pool:
         try:
             await _ensure_schema()
             async with pool.acquire() as conn:
+                # Fetch most-recent first, then reverse so LLM gets chronological order
                 rows = await conn.fetch(
                     """SELECT role, content, created_at FROM conversations
                        WHERE phone_number = $1
-                       ORDER BY created_at ASC LIMIT $2""",
+                       ORDER BY created_at DESC LIMIT $2""",
                     phone_number, limit,
                 )
             if rows:
-                return [dict(r) for r in rows]
+                return [dict(r) for r in reversed(rows)]
         except Exception as e:
             logger.warning(f"Postgres get_history failed, trying memory: {e}")
 
@@ -321,10 +330,12 @@ async def format_history_for_llm(
     max_messages: int = 10,
     max_chars: int = 4000,
 ) -> list[dict]:
+    """Return recent conversation history formatted for LLM messages list."""
     history = await get_conversation_history(phone_number, limit=max_messages)
     formatted = []
     total_chars = 0
 
+    # Walk newest-to-oldest to fill char budget, then reverse for chronological order
     for msg in reversed(history):
         content = msg["content"]
         if total_chars + len(content) > max_chars:
@@ -357,11 +368,9 @@ async def track_application(
         notes=notes,
     )
 
-    # Save to memory
     if phone_number not in _memory_applications:
         _memory_applications[phone_number] = []
 
-    # Update existing or append
     existing = [a for a in _memory_applications[phone_number] if a["opportunity_id"] == opportunity_id]
     if existing:
         existing[0]["status"] = status
@@ -381,9 +390,9 @@ async def track_application(
                         (phone_number, opportunity_id, opportunity_name, status, applied_at, updated_at, notes)
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
                     ON CONFLICT (phone_number, opportunity_id) DO UPDATE SET
-                        status = EXCLUDED.status,
+                        status     = EXCLUDED.status,
                         updated_at = EXCLUDED.updated_at,
-                        notes = COALESCE(EXCLUDED.notes, application_tracking.notes)
+                        notes      = COALESCE(EXCLUDED.notes, application_tracking.notes)
                 """,
                     phone_number, opportunity_id, opportunity_name,
                     status, _to_dt(now), _to_dt(now), notes,
@@ -391,7 +400,6 @@ async def track_application(
         except Exception as e:
             logger.warning(f"Postgres track_application failed: {e}")
 
-    # Also update the profile's applied_opportunities list
     profile = await get_profile(phone_number)
     if profile and opportunity_id not in profile.applied_opportunities:
         profile.applied_opportunities.append(opportunity_id)
@@ -414,12 +422,12 @@ async def get_applications(phone_number: str) -> list[dict]:
                 )
             if rows:
                 result = []
-                for _r in rows:
-                    _d = dict(_r)
-                    for _f in ("applied_at", "updated_at", "created_at"):
-                        if _f in _d and hasattr(_d[_f], "isoformat"):
-                            _d[_f] = _d[_f].isoformat()
-                    result.append(_d)
+                for r in rows:
+                    d = dict(r)
+                    for f in ("applied_at", "updated_at", "created_at"):
+                        if f in d and hasattr(d[f], "isoformat"):
+                            d[f] = d[f].isoformat()
+                    result.append(d)
                 return result
         except Exception as e:
             logger.warning(f"Postgres get_applications failed: {e}")
@@ -437,7 +445,6 @@ async def update_application_status(
 
 
 async def get_all_active_applications() -> list[dict]:
-    """For deadline reminders   get all pending applications across all users."""
     pool = await get_pool()
     if pool:
         try:
@@ -449,17 +456,16 @@ async def get_all_active_applications() -> list[dict]:
                        ORDER BY applied_at DESC"""
                 )
             result = []
-            for _r in rows:
-                _d = dict(_r)
-                for _f in ("applied_at", "updated_at", "created_at"):
-                    if _f in _d and hasattr(_d[_f], "isoformat"):
-                        _d[_f] = _d[_f].isoformat()
-                result.append(_d)
+            for r in rows:
+                d = dict(r)
+                for f in ("applied_at", "updated_at", "created_at"):
+                    if f in d and hasattr(d[f], "isoformat"):
+                        d[f] = d[f].isoformat()
+                result.append(d)
             return result
         except Exception as e:
             logger.warning(f"Postgres get_all_active_applications failed: {e}")
 
-    # Flatten all in-memory applications
     all_apps = []
     for apps in _memory_applications.values():
         all_apps.extend([a for a in apps if a.get("status") in ("applied", "pending")])
@@ -471,13 +477,11 @@ async def get_all_active_applications() -> list[dict]:
 # ===================================================================
 
 async def save_doc_session(phone_number: str, session: dict):
-    """Persist document flow session so it survives Render restarts."""
     import json
     await save_message(phone_number, "system", f"[DOC_SESSION:{json.dumps(session)}]")
 
 
 async def load_doc_session(phone_number: str) -> dict:
-    """Load the most recent document flow session for a user."""
     import json
     history = await get_conversation_history(phone_number, limit=30)
     for msg in reversed(history):
@@ -491,5 +495,4 @@ async def load_doc_session(phone_number: str) -> dict:
 
 
 async def clear_doc_session(phone_number: str):
-    """Clear document session by saving an empty marker."""
     await save_message(phone_number, "system", "[DOC_SESSION:{}]")
