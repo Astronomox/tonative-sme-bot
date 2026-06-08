@@ -91,6 +91,7 @@ async def _ensure_schema():
             CREATE TABLE IF NOT EXISTS sme_profiles (
                 phone_number TEXT PRIMARY KEY,
                 state TEXT NOT NULL DEFAULT 'onboarding',
+                owner_name TEXT,
                 business_name TEXT,
                 business_type TEXT,
                 location_city TEXT,
@@ -135,6 +136,10 @@ async def _ensure_schema():
             CREATE INDEX IF NOT EXISTS idx_applications_deadline
                 ON application_tracking (opportunity_id, status);
         """)
+        # Add owner_name column if it doesn't exist (migration for existing tables)
+        await conn.execute(
+            "ALTER TABLE sme_profiles ADD COLUMN IF NOT EXISTS owner_name TEXT"
+        )
     _schema_applied = True
     logger.info("Database schema ready")
 
@@ -142,6 +147,34 @@ async def _ensure_schema():
 # ===================================================================
 # PROFILE OPERATIONS
 # ===================================================================
+
+def _sanitize_profile_data(data: dict) -> dict:
+    """Clean raw DB row data before passing to SMEProfile to avoid Pydantic validation errors."""
+    # Convert datetime objects to ISO strings
+    for _f in ("created_at", "updated_at"):
+        if _f in data and hasattr(data[_f], "isoformat"):
+            data[_f] = data[_f].isoformat()
+
+    # Coerce employee_count: empty string or non-integer → None
+    ec = data.get("employee_count")
+    if ec is not None:
+        if isinstance(ec, str):
+            stripped = ec.strip()
+            if stripped == "":
+                data["employee_count"] = None
+            else:
+                try:
+                    data["employee_count"] = int(stripped)
+                except (ValueError, TypeError):
+                    data["employee_count"] = None
+
+    # Ensure applied_opportunities is always a list of strings
+    data["applied_opportunities"] = [
+        str(x) for x in (data.get("applied_opportunities") or []) if x is not None
+    ]
+
+    return data
+
 
 async def get_profile(phone_number: str) -> Optional[SMEProfile]:
     pool = await get_pool()
@@ -154,23 +187,32 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
                     phone_number,
                 )
             if row:
-                data = dict(row)
-                data["applied_opportunities"] = list(data.get("applied_opportunities") or [])
-                for _f in ("created_at", "updated_at"):
-                    if _f in data and hasattr(data[_f], "isoformat"):
-                        data[_f] = data[_f].isoformat()
+                data = _sanitize_profile_data(dict(row))
                 return SMEProfile(**data)
         except Exception as e:
             logger.warning(f"Postgres get_profile failed, trying memory: {e}")
 
     data = _memory_profiles.get(phone_number)
-    return SMEProfile(**data) if data else None
+    if data:
+        try:
+            return SMEProfile(**_sanitize_profile_data(dict(data)))
+        except Exception as e:
+            logger.warning(f"Memory profile corrupt, ignoring: {e}")
+    return None
 
 
 async def upsert_profile(profile: SMEProfile) -> SMEProfile:
     profile.updated_at = _now()
     if not profile.created_at:
         profile.created_at = _now()
+
+    # Coerce employee_count: must be int or None, never empty string
+    if isinstance(profile.employee_count, str):
+        stripped = profile.employee_count.strip()
+        try:
+            profile.employee_count = int(stripped) if stripped else None
+        except (ValueError, TypeError):
+            profile.employee_count = None
 
     data = profile.model_dump()
     data["state"] = profile.state.value
@@ -183,14 +225,15 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
             async with pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO sme_profiles (
-                        phone_number, state, business_name, business_type,
+                        phone_number, state, owner_name, business_name, business_type,
                         location_city, location_state, business_stage,
                         monthly_revenue, employee_count, cac_registered,
                         biggest_challenge, language, applied_opportunities,
                         created_at, updated_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                     ON CONFLICT (phone_number) DO UPDATE SET
                         state = EXCLUDED.state,
+                        owner_name = EXCLUDED.owner_name,
                         business_name = EXCLUDED.business_name,
                         business_type = EXCLUDED.business_type,
                         location_city = EXCLUDED.location_city,
@@ -205,7 +248,7 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
                         updated_at = EXCLUDED.updated_at
                 """,
                     profile.phone_number, profile.state.value,
-                    profile.business_name, profile.business_type,
+                    profile.owner_name, profile.business_name, profile.business_type,
                     profile.location_city, profile.location_state,
                     profile.business_stage, profile.monthly_revenue,
                     profile.employee_count, profile.cac_registered,
