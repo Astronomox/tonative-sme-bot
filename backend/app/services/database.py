@@ -136,7 +136,7 @@ async def _ensure_schema():
             CREATE INDEX IF NOT EXISTS idx_applications_deadline
                 ON application_tracking (opportunity_id, status);
         """)
-        # Add owner_name column if it doesn't exist (migration for existing tables)
+        # Migration: add owner_name if it doesn't exist on old tables
         await conn.execute(
             "ALTER TABLE sme_profiles ADD COLUMN IF NOT EXISTS owner_name TEXT"
         )
@@ -149,30 +149,25 @@ async def _ensure_schema():
 # ===================================================================
 
 def _sanitize_profile_data(data: dict) -> dict:
-    """Clean raw DB row data before passing to SMEProfile to avoid Pydantic validation errors."""
-    # Convert datetime objects to ISO strings
+    """Clean raw data (from DB row or memory dict) before passing to SMEProfile."""
+    # datetime -> isoformat string (asyncpg returns datetime for TIMESTAMPTZ)
     for _f in ("created_at", "updated_at"):
         if _f in data and hasattr(data[_f], "isoformat"):
             data[_f] = data[_f].isoformat()
 
-    # Coerce employee_count: empty string or non-integer → None
+    # employee_count must be int or None - LLM sometimes returns ""
     ec = data.get("employee_count")
-    if ec is not None:
-        if isinstance(ec, str):
-            stripped = ec.strip()
-            if stripped == "":
-                data["employee_count"] = None
-            else:
-                try:
-                    data["employee_count"] = int(stripped)
-                except (ValueError, TypeError):
-                    data["employee_count"] = None
+    if ec is not None and not isinstance(ec, int):
+        stripped = str(ec).strip()
+        try:
+            data["employee_count"] = int(stripped) if stripped else None
+        except (ValueError, TypeError):
+            data["employee_count"] = None
 
-    # Ensure applied_opportunities is always a list of strings
+    # applied_opportunities must be list[str]
     data["applied_opportunities"] = [
         str(x) for x in (data.get("applied_opportunities") or []) if x is not None
     ]
-
     return data
 
 
@@ -192,12 +187,13 @@ async def get_profile(phone_number: str) -> Optional[SMEProfile]:
         except Exception as e:
             logger.warning(f"Postgres get_profile failed, trying memory: {e}")
 
-    data = _memory_profiles.get(phone_number)
-    if data:
+    raw = _memory_profiles.get(phone_number)
+    if raw:
         try:
-            return SMEProfile(**_sanitize_profile_data(dict(data)))
+            return SMEProfile(**_sanitize_profile_data(dict(raw)))
         except Exception as e:
-            logger.warning(f"Memory profile corrupt, ignoring: {e}")
+            logger.warning(f"Memory profile corrupt, clearing: {e}")
+            _memory_profiles.pop(phone_number, None)
     return None
 
 
@@ -206,7 +202,7 @@ async def upsert_profile(profile: SMEProfile) -> SMEProfile:
     if not profile.created_at:
         profile.created_at = _now()
 
-    # Coerce employee_count: must be int or None, never empty string
+    # Coerce employee_count: must be int or None before DB write
     if isinstance(profile.employee_count, str):
         stripped = profile.employee_count.strip()
         try:
